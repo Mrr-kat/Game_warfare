@@ -393,4 +393,205 @@ function drawMap() {
 function drawSpawnZone(cx, cy, team) {
     if (!inFOV(cx, cy, 220)) return;
     const sx = cx - camera.x, sy = cy - camera.y;
-    const c = team === "red" ? "224
+    const c = team === "red" ? "224,48,48" : "32,96,224";
+    ctx.beginPath();
+    ctx.arc(sx, sy, 200, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(${c},0.04)`;
+    ctx.fill();
+    ctx.strokeStyle = `rgba(${c},0.12)`;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([10, 8]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = `rgba(${c},0.5)`;
+    ctx.font = "bold 11px 'Share Tech Mono',monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(team === "red" ? "SPAWN ROJO" : "SPAWN AZUL", sx, sy);
+}
+
+function drawTerrain() {
+    if (!terrainCache ||
+        Math.abs(camera.x - cacheCamX) > CACHE_PAD/2 ||
+        Math.abs(camera.y - cacheCamY) > CACHE_PAD/2) rebuildTerrainCache();
+    ctx.drawImage(terrainCache, cacheWorldX - camera.x, cacheWorldY - camera.y);
+}
+
+function drawPlayer(pid, pd, isLocal) {
+    const [px, py, hp, team, shape, dead, angle] = pd;
+    if (!inFOV(px, py, 40)) return;
+    const sx = px - camera.x, sy = py - camera.y, r = 20;
+    const isMe = (pid === myId);
+    const tc = team === "red" ? "#cc2828" : "#1850cc";
+    const tb = team === "red" ? "#e84444" : "#3d78f5";
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(angle);
+    if (dead) ctx.globalAlpha = 0.35;
+    ctx.fillStyle = tc;
+    ctx.strokeStyle = isMe ? "rgba(255,255,255,0.9)" : tb;
+    ctx.lineWidth = isMe ? 2.5 : 1.5;
+    if (shape === "circle") {
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI*2);
+        ctx.fill();
+        ctx.stroke();
+    } else if (shape === "square") {
+        const s = r * 1.5;
+        ctx.fillRect(-s/2, -s/2, s, s);
+        ctx.strokeRect(-s/2, -s/2, s, s);
+    } else {
+        ctx.beginPath();
+        ctx.moveTo(r, 0);
+        ctx.lineTo(-r*.7, -r*.75);
+        ctx.lineTo(-r*.7, r*.75);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    if (!dead) {
+        const bw = 40, bh = 4, bx = sx - bw/2, by = sy - r - 10, hr = hp/100;
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
+        ctx.fillRect(bx-1, by-1, bw+2, bh+2);
+        ctx.fillStyle = hr > .6 ? "#2ecc71" : hr > .3 ? "#f39c12" : "#e74c3c";
+        ctx.fillRect(bx, by, bw * hr, bh);
+        if (isMe) {
+            ctx.fillStyle = "rgba(255,255,255,0.6)";
+            ctx.font = "bold 9px 'Share Tech Mono',monospace";
+            ctx.textAlign = "center";
+            ctx.fillText("TU", sx, by-3);
+        }
+    }
+}
+
+function drawProjectile(bd) {
+    const [bx, by, dx, dy, ot] = bd;
+    if (!inFOV(bx, by, 20)) return;
+    const sx = bx - camera.x, sy = by - camera.y;
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(Math.atan2(dy, dx));
+    ctx.fillStyle = ot === "red" ? "#ff6030" : "#30a8ff";
+    ctx.fillRect(-6, -2, 12, 4);
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    ctx.fillRect(3, -1, 3, 2);
+    ctx.restore();
+}
+
+// ═══════════════════════════════════════════
+// CÁMARA
+// ═══════════════════════════════════════════
+function updateCamera() {
+    let cx, cy;
+    if (localReady) {
+        cx = localX;
+        cy = localY;
+    } else if (myId && snapshots.length) {
+        const last = snapshots[snapshots.length-1];
+        if (last.p[myId]) {
+            cx = last.p[myId][0];
+            cy = last.p[myId][1];
+        } else return;
+    } else return;
+    camera.x = Math.max(0, Math.min(MAP_WIDTH - canvas.width, cx - canvas.width/2));
+    camera.y = Math.max(0, Math.min(MAP_HEIGHT - canvas.height, cy - canvas.height/2));
+}
+
+// ═══════════════════════════════════════════
+// CLIENT-SIDE PREDICTION
+// ═══════════════════════════════════════════
+const PLAYER_SPEED_CLIENT = 250;
+function updateLocalPlayer(dt) {
+    if (!myId || isDead) return;
+    if (!localReady && snapshots.length) {
+        const last = snapshots[snapshots.length-1];
+        if (last.p[myId]) {
+            localX = last.p[myId][0];
+            localY = last.p[myId][1];
+            localReady = true;
+        }
+        return;
+    }
+    if (!localReady) return;
+    let dx = 0, dy = 0;
+    if (keys.w) dy -= 1;
+    if (keys.s) dy += 1;
+    if (keys.a) dx -= 1;
+    if (keys.d) dx += 1;
+    if (dx && dy) {
+        dx *= 0.7071;
+        dy *= 0.7071;
+    }
+    localX = Math.max(20, Math.min(MAP_WIDTH - 20, localX + dx * PLAYER_SPEED_CLIENT * dt));
+    localY = Math.max(20, Math.min(MAP_HEIGHT - 20, localY + dy * PLAYER_SPEED_CLIENT * dt));
+}
+
+// ═══════════════════════════════════════════
+// DEATH TIMER
+// ═══════════════════════════════════════════
+function updateDeathTimer(dt) {
+    if (!isDead) return;
+    deathTimer = Math.max(0, deathTimer - dt);
+    const s = Math.ceil(deathTimer);
+    deathTimerEl.textContent = s > 0 ? "Reapareciendo en " + s + "..." : "Reapareciendo...";
+}
+
+// ═══════════════════════════════════════════
+// CONTROL DE CALIDAD
+// ═══════════════════════════════════════════
+function reduceQuality() {
+    if (qualityReduced) return;
+    qualityReduced = true;
+    // Reducir distancia de renderizado
+    window.FOV_MARGIN = 50;
+    // Limpiar caché de terreno más agresivamente
+    terrainCache = null;
+    cacheCamX = -99999;
+}
+
+// ═══════════════════════════════════════════
+// GAME LOOP
+// ═══════════════════════════════════════════
+function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+    
+    // Monitoreo de FPS
+    frameCount++;
+    if (now - lastFPSUpdate >= 1000) {
+        currentFPS = frameCount;
+        frameCount = 0;
+        lastFPSUpdate = now;
+        if (currentFPS < 25 && !qualityReduced) {
+            reduceQuality();
+        }
+    }
+    
+    updateLocalPlayer(dt);
+    updateCamera();
+    updateDeathTimer(dt);
+    
+    const state = getInterpolated(now);
+    
+    drawMap();
+    drawTerrain();
+    
+    if (state) {
+        for (const bid in state.b) drawProjectile(state.b[bid]);
+        for (const pid in state.p) {
+            if (pid !== myId) drawPlayer(pid, state.p[pid]);
+        }
+        if (myId && state.p[myId]) {
+            const sp = state.p[myId];
+            const renderPd = [
+                localReady ? localX : sp[0],
+                localReady ? localY : sp[1],
+                sp[2], sp[3], sp[4], sp[5], mouseAngle
+            ];
+            drawPlayer(myId, renderPd);
+        }
+    }
+    
+    requestAnimationFrame(gameLoop);
+}
