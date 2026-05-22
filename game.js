@@ -4,19 +4,26 @@ const socket = io({ transports: ["websocket"] });
 
 const MAP_WIDTH  = 5000;
 const MAP_HEIGHT = 5000;
-const TILE_SIZE  = 200; // tiles más grandes = menos fillRect en el fallback
+const TILE_SIZE  = 200;
 const FOV_MARGIN = 80;
+const SERVER_HZ  = 10;          // ticks del servidor
+const INTERP_MS  = 1000 / SERVER_HZ;  // 100ms de buffer de interpolación
 
 let myId    = null;
 let myTeam  = null;
 let myShape = null;
 
-let gameState = { p: {}, b: {} };
+// Buffer de snapshots del servidor para interpolación
+// snapshots = [ {ts, p, b}, ... ] (últimos 2 son suficientes)
+let snapshots = [];
 
 let keys = { w: false, a: false, s: false, d: false };
 let mouseAngle = 0;
-let mouseX = 0;
-let mouseY = 0;
+let mouseX = 0, mouseY = 0;
+
+// Posición predicha del jugador local (client-side prediction)
+let localX = 0, localY = 0;
+let localReady = false;
 
 let camera   = { x: 0, y: 0 };
 let lastTime = performance.now();
@@ -26,149 +33,95 @@ let isDead   = false;
 const canvas = document.getElementById("game-canvas");
 const ctx    = canvas.getContext("2d", { alpha: false });
 
-const lobbySel    = document.getElementById("lobby-screen");
-const gameSel     = document.getElementById("game-screen");
-const deathOverlay= document.getElementById("death-overlay");
-const killFeed    = document.getElementById("kill-feed");
-const healthFill  = document.getElementById("health-bar-fill");
-const healthText  = document.getElementById("health-bar-text");
-const crosshair   = document.getElementById("crosshair");
-const deathTimerEl= document.getElementById("death-timer-text");
+const lobbySel     = document.getElementById("lobby-screen");
+const gameSel      = document.getElementById("game-screen");
+const deathOverlay = document.getElementById("death-overlay");
+const killFeed     = document.getElementById("kill-feed");
+const healthFill   = document.getElementById("health-bar-fill");
+const healthText   = document.getElementById("health-bar-text");
+const crosshair    = document.getElementById("crosshair");
+const deathTimerEl = document.getElementById("death-timer-text");
 
 // ═══════════════════════════════════════════
-// TERRENO — generación (misma semilla que servidor)
+// TERRENO
 // ═══════════════════════════════════════════
 const TERRAIN_SEED = 42;
 let terrainObjects = [];
 
 function seededRandom(seed) {
     let s = seed;
-    return function () {
-        s = (s * 1664525 + 1013904223) & 0xffffffff;
-        return (s >>> 0) / 0xffffffff;
-    };
+    return () => { s=(s*1664525+1013904223)&0xffffffff; return (s>>>0)/0xffffffff; };
 }
 
 function generateTerrain() {
     const rng = seededRandom(TERRAIN_SEED);
     terrainObjects = [];
-    for (let i = 0; i < 70; i++) {
-        const x = rng() * MAP_WIDTH;
-        const y = rng() * MAP_HEIGHT;
-        const w = 40 + rng() * 70;
-        const h = 28 + rng() * 50;
-        rng();
-        terrainObjects.push({ type: "rock", x, y, r: (w + h) / 4 });
+    for (let i=0;i<70;i++){
+        const x=rng()*MAP_WIDTH, y=rng()*MAP_HEIGHT;
+        const w=40+rng()*70, h=28+rng()*50; rng();
+        terrainObjects.push({type:"rock",x,y,r:(w+h)/4});
     }
-    for (let i = 0; i < 100; i++) {
-        const x = rng() * MAP_WIDTH;
-        const y = rng() * MAP_HEIGHT;
-        const r = 16 + rng() * 24;
-        rng(); rng(); rng();
-        terrainObjects.push({ type: "bush", x, y, r });
+    for (let i=0;i<100;i++){
+        const x=rng()*MAP_WIDTH, y=rng()*MAP_HEIGHT, r=16+rng()*24;
+        rng();rng();rng();
+        terrainObjects.push({type:"bush",x,y,r});
     }
-    for (let i = 0; i < 50; i++) {
-        const x = rng() * MAP_WIDTH;
-        const y = rng() * MAP_HEIGHT;
-        const size = 22 + rng() * 14;
-        rng();
-        terrainObjects.push({ type: "crate", x, y, size });
+    for (let i=0;i<50;i++){
+        const x=rng()*MAP_WIDTH, y=rng()*MAP_HEIGHT, size=22+rng()*14; rng();
+        terrainObjects.push({type:"crate",x,y,size});
     }
 }
 generateTerrain();
 
 // ═══════════════════════════════════════════
 // CACHE DE TERRENO
-// Se dibuja en un canvas oculto y se pega con drawImage (sin recorte).
-// Se reconstruye solo cuando la cámara se mueve > CACHE_PAD/2 píxeles.
 // ═══════════════════════════════════════════
 const CACHE_PAD = 300;
-let terrainCache   = null;  // HTMLCanvasElement
-let cacheCamX      = -99999;
-let cacheCamY      = -99999;
-// esquina superior-izquierda del cache en coordenadas de mundo
-let cacheWorldX    = 0;
-let cacheWorldY    = 0;
+let terrainCache = null, cacheCamX = -99999, cacheCamY = -99999;
+let cacheWorldX  = 0, cacheWorldY = 0;
 
 function rebuildTerrainCache() {
-    const cw = canvas.width  + CACHE_PAD * 2;
-    const ch = canvas.height + CACHE_PAD * 2;
-
-    if (!terrainCache) {
-        terrainCache = document.createElement("canvas");
-    }
-    terrainCache.width  = cw;
-    terrainCache.height = ch;
-
-    // origen del cache en el mundo
+    const cw = canvas.width + CACHE_PAD*2, ch = canvas.height + CACHE_PAD*2;
+    if (!terrainCache) terrainCache = document.createElement("canvas");
+    terrainCache.width = cw; terrainCache.height = ch;
     cacheWorldX = camera.x - CACHE_PAD;
     cacheWorldY = camera.y - CACHE_PAD;
-
     const c = terrainCache.getContext("2d");
-    c.clearRect(0, 0, cw, ch);
-
+    c.clearRect(0,0,cw,ch);
     for (const obj of terrainObjects) {
-        // posición relativa al cache
-        const sx = obj.x - cacheWorldX;
-        const sy = obj.y - cacheWorldY;
-        const pad = (obj.r || obj.size || 40) + 10;
-        if (sx + pad < 0 || sx - pad > cw || sy + pad < 0 || sy - pad > ch) continue;
-
-        if (obj.type === "rock") {
-            c.fillStyle = "#4a4a52";
-            c.beginPath();
-            c.arc(sx, sy, obj.r, 0, Math.PI * 2);
-            c.fill();
-            c.strokeStyle = "rgba(160,80,255,0.85)";
-            c.lineWidth = 2;
-            c.stroke();
-        } else if (obj.type === "bush") {
-            c.fillStyle = "#2d6e2d";
-            c.beginPath();
-            c.arc(sx, sy, obj.r, 0, Math.PI * 2);
-            c.fill();
-        } else if (obj.type === "crate") {
-            const s = obj.size;
-            c.fillStyle = "#7a5230";
-            c.fillRect(sx - s / 2, sy - s / 2, s, s);
-            c.strokeStyle = "rgba(160,80,255,0.85)";
-            c.lineWidth = 2;
-            c.strokeRect(sx - s / 2, sy - s / 2, s, s);
+        const sx=obj.x-cacheWorldX, sy=obj.y-cacheWorldY;
+        const pad=(obj.r||obj.size||40)+10;
+        if (sx+pad<0||sx-pad>cw||sy+pad<0||sy-pad>ch) continue;
+        if (obj.type==="rock"){
+            c.fillStyle="#4a4a52"; c.beginPath(); c.arc(sx,sy,obj.r,0,Math.PI*2); c.fill();
+            c.strokeStyle="rgba(160,80,255,0.85)"; c.lineWidth=2; c.stroke();
+        } else if (obj.type==="bush"){
+            c.fillStyle="#2d6e2d"; c.beginPath(); c.arc(sx,sy,obj.r,0,Math.PI*2); c.fill();
+        } else {
+            const s=obj.size;
+            c.fillStyle="#7a5230"; c.fillRect(sx-s/2,sy-s/2,s,s);
+            c.strokeStyle="rgba(160,80,255,0.85)"; c.lineWidth=2; c.strokeRect(sx-s/2,sy-s/2,s,s);
         }
     }
-
-    cacheCamX = camera.x;
-    cacheCamY = camera.y;
+    cacheCamX = camera.x; cacheCamY = camera.y;
 }
 
 // ═══════════════════════════════════════════
-// TILE PATTERN — creado tras primer resize
+// TILE PATTERN
 // ═══════════════════════════════════════════
 let tilePattern = null;
-
 function buildTilePattern() {
-    const tc  = document.createElement("canvas");
-    tc.width  = TILE_SIZE * 2;
-    tc.height = TILE_SIZE * 2;
-    const tc2 = tc.getContext("2d");
-    tc2.fillStyle = "#14141d";
-    tc2.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
-    tc2.fillRect(TILE_SIZE, TILE_SIZE, TILE_SIZE, TILE_SIZE);
-    tc2.fillStyle = "#111119";
-    tc2.fillRect(TILE_SIZE, 0, TILE_SIZE, TILE_SIZE);
-    tc2.fillRect(0, TILE_SIZE, TILE_SIZE, TILE_SIZE);
-    tilePattern = ctx.createPattern(tc, "repeat");
+    const tc=document.createElement("canvas");
+    tc.width=TILE_SIZE*2; tc.height=TILE_SIZE*2;
+    const c=tc.getContext("2d");
+    c.fillStyle="#14141d"; c.fillRect(0,0,TILE_SIZE,TILE_SIZE); c.fillRect(TILE_SIZE,TILE_SIZE,TILE_SIZE,TILE_SIZE);
+    c.fillStyle="#111119"; c.fillRect(TILE_SIZE,0,TILE_SIZE,TILE_SIZE); c.fillRect(0,TILE_SIZE,TILE_SIZE,TILE_SIZE);
+    tilePattern = ctx.createPattern(tc,"repeat");
 }
 
-// ═══════════════════════════════════════════
-// RESIZE
-// ═══════════════════════════════════════════
 function resizeCanvas() {
-    canvas.width  = window.innerWidth;
-    canvas.height = window.innerHeight;
-    tilePattern   = null;   // se recrea con el nuevo ctx
-    terrainCache  = null;   // se reconstruye
-    cacheCamX     = -99999;
+    canvas.width=window.innerWidth; canvas.height=window.innerHeight;
+    tilePattern=null; terrainCache=null; cacheCamX=-99999;
 }
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
@@ -181,303 +134,364 @@ const redHalf  = document.getElementById("select-red");
 const blueHalf = document.getElementById("select-blue");
 const joinBtn  = document.getElementById("join-btn");
 
-function updateTeamSelectionUI(t) {
-    redHalf  && redHalf .classList.toggle("selected", t === "red");
-    blueHalf && blueHalf.classList.toggle("selected", t === "blue");
+function updateTeamUI(t){
+    redHalf  && redHalf .classList.toggle("selected", t==="red");
+    blueHalf && blueHalf.classList.toggle("selected", t==="blue");
 }
-redHalf  && redHalf .addEventListener("click", () => { selectedTeam = "red";  updateTeamSelectionUI("red");  });
-blueHalf && blueHalf.addEventListener("click", () => { selectedTeam = "blue"; updateTeamSelectionUI("blue"); });
-updateTeamSelectionUI(selectedTeam);
+redHalf  && redHalf .addEventListener("click",()=>{ selectedTeam="red";  updateTeamUI("red");  });
+blueHalf && blueHalf.addEventListener("click",()=>{ selectedTeam="blue"; updateTeamUI("blue"); });
+updateTeamUI(selectedTeam);
 
-function setLobbyCursor() { document.body.style.cursor = "default"; crosshair && (crosshair.style.display = "none"); }
-function setGameCursor()  { document.body.style.cursor = "none";    crosshair && (crosshair.style.display = "block"); }
+const setLobbyCursor = ()=>{ document.body.style.cursor="default"; crosshair&&(crosshair.style.display="none"); };
+const setGameCursor  = ()=>{ document.body.style.cursor="none";    crosshair&&(crosshair.style.display="block"); };
 setLobbyCursor();
 
-joinBtn && joinBtn.addEventListener("click", () => {
-    myTeam = selectedTeam;
-    socket.emit("join_game", { team: selectedTeam });
-});
+joinBtn && joinBtn.addEventListener("click",()=>{ myTeam=selectedTeam; socket.emit("join_game",{team:selectedTeam}); });
 
 // ═══════════════════════════════════════════
 // EVENTOS DE RED
 // ═══════════════════════════════════════════
 socket.on("joined", data => {
-    myId    = data.id;
-    myTeam  = data.team;
-    myShape = data.shape;
-    lobbySel.classList.remove("active");
-    gameSel .classList.add("active");
+    myId=data.id; myTeam=data.team; myShape=data.shape;
+    lobbySel.classList.remove("active"); gameSel.classList.add("active");
     setGameCursor();
-    const shapeNames = { circle: "CIRCULO", square: "CUADRADO", triangle: "TRIANGULO" };
-    document.getElementById("player-shape-hud").textContent = shapeNames[myShape] || myShape.toUpperCase();
-    const teamEl = document.getElementById("player-team-hud");
-    teamEl.textContent = myTeam === "red" ? "BANDO ROJO" : "BANDO AZUL";
-    teamEl.className   = myTeam === "red" ? "red-team-text" : "blue-team-text";
-    lastTime = performance.now();
+    const names={circle:"CIRCULO",square:"CUADRADO",triangle:"TRIANGULO"};
+    document.getElementById("player-shape-hud").textContent=names[myShape]||myShape.toUpperCase();
+    const el=document.getElementById("player-team-hud");
+    el.textContent=myTeam==="red"?"BANDO ROJO":"BANDO AZUL";
+    el.className  =myTeam==="red"?"red-team-text":"blue-team-text";
+    lastTime=performance.now();
     requestAnimationFrame(gameLoop);
 });
 
-// Estado compacto: p[id] = [x,y,hp,team,shape,dead,angle]  b[id] = [x,y,dx,dy,owner_team]
 socket.on("game_state", data => {
-    gameState = data;
-    let rc = 0, bc = 0;
-    for (const id in data.p) { if (data.p[id][3] === "red") rc++; else bc++; }
-    document.getElementById("red-count") .textContent = rc;
-    document.getElementById("blue-count").textContent = bc;
+    // Guardar snapshot con timestamp de llegada
+    const ts = performance.now();
+    snapshots.push({ ts, p: data.p, b: data.b });
+    if (snapshots.length > 3) snapshots.shift(); // solo necesitamos 2-3
+
+    // Actualizar HP y contadores con el último snapshot (no interpolado)
+    let rc=0, bc=0;
+    for (const id in data.p){ if(data.p[id][3]==="red") rc++; else bc++; }
+    document.getElementById("red-count") .textContent=rc;
+    document.getElementById("blue-count").textContent=bc;
+
     if (myId && data.p[myId]) {
-        const hp = Math.max(0, data.p[myId][2]);
-        healthFill.style.width      = hp + "%";
-        healthText.textContent      = hp;
-        healthFill.style.background =
-            hp > 60 ? "linear-gradient(90deg,#2ecc71,#27ae60)" :
-            hp > 30 ? "linear-gradient(90deg,#f39c12,#e67e22)" :
-                      "linear-gradient(90deg,#e74c3c,#c0392b)";
+        const hp=Math.max(0, data.p[myId][2]);
+        healthFill.style.width=hp+"%"; healthText.textContent=hp;
+        healthFill.style.background=
+            hp>60?"linear-gradient(90deg,#2ecc71,#27ae60)":
+            hp>30?"linear-gradient(90deg,#f39c12,#e67e22)":
+                  "linear-gradient(90deg,#e74c3c,#c0392b)";
+        // Corrección suave de posición local con el servidor
+        if (localReady && !isDead) {
+            const srvX=data.p[myId][0], srvY=data.p[myId][1];
+            // Reconciliar — mover 20% hacia la posición del servidor por frame
+            localX += (srvX - localX) * 0.2;
+            localY += (srvY - localY) * 0.2;
+        }
     }
 });
 
-socket.on("player_died", data => {
-    if (data.id === myId) {
-        isDead = true; deathTimer = 3;
-        deathOverlay.classList.remove("hidden");
-        document.getElementById("death-by-text").textContent =
-            data.killer_id && data.killer_id !== data.id ? "Eliminado por un enemigo" : "";
-        deathTimerEl.textContent = "Reapareciendo en 3...";
-    }
-    addKillFeedEntry(data.killer_team, data.victim_team);
+socket.on("player_died", data=>{
+    if (data.id===myId){ isDead=true; deathTimer=3; deathOverlay.classList.remove("hidden");
+        document.getElementById("death-by-text").textContent=
+            data.killer_id&&data.killer_id!==data.id?"Eliminado por un enemigo":"";
+        deathTimerEl.textContent="Reapareciendo en 3..."; }
+    addKillFeed(data.killer_team, data.victim_team);
 });
 
-socket.on("player_respawned", data => {
-    if (data.id === myId) { isDead = false; deathOverlay.classList.add("hidden"); }
+socket.on("player_respawned", data=>{
+    if (data.id===myId){ isDead=false; localReady=false; deathOverlay.classList.add("hidden"); }
 });
+socket.on("player_left",()=>{});
 
-socket.on("player_left", () => {});
-
-function addKillFeedEntry(kt, vt) {
-    const e  = document.createElement("div");
-    e.className = "kill-entry";
-    const kc = kt === "red" ? "#ff5555" : "#4488ff";
-    const vc = vt === "red" ? "#ff5555" : "#4488ff";
-    const kl = kt === "red" ? "ROJO" : "AZUL";
-    const vl = vt === "red" ? "ROJO" : "AZUL";
-    e.innerHTML = `<span style="color:${kc}">${kl}</span><span class="symbol"> ✦ </span><span style="color:${vc}">${vl}</span>`;
+function addKillFeed(kt,vt){
+    const e=document.createElement("div"); e.className="kill-entry";
+    const kc=kt==="red"?"#ff5555":"#4488ff", vc=vt==="red"?"#ff5555":"#4488ff";
+    e.innerHTML=`<span style="color:${kc}">${kt==="red"?"ROJO":"AZUL"}</span><span class="symbol"> ✦ </span><span style="color:${vc}">${vt==="red"?"ROJO":"AZUL"}</span>`;
     killFeed.appendChild(e);
-    setTimeout(() => { e.style.opacity = "0"; setTimeout(() => e.remove(), 500); }, 3000);
-    while (killFeed.children.length > 5) killFeed.removeChild(killFeed.firstChild);
+    setTimeout(()=>{ e.style.opacity="0"; setTimeout(()=>e.remove(),500); },3000);
+    while(killFeed.children.length>5) killFeed.removeChild(killFeed.firstChild);
 }
 
 // ═══════════════════════════════════════════
-// INPUT
+// INPUT — envío a 20/s pero solo si hay cambio
 // ═══════════════════════════════════════════
-let lastSentAngle = 0;
-let lastSentKeys  = "";
+let lastSentKeys="", lastSentAngle=0;
+setInterval(()=>{
+    if (!myId||isDead) return;
+    const ks=`${+keys.w}${+keys.a}${+keys.s}${+keys.d}`;
+    if (ks===lastSentKeys&&Math.abs(mouseAngle-lastSentAngle)<0.02) return;
+    lastSentKeys=ks; lastSentAngle=mouseAngle;
+    socket.emit("player_input",{keys:{...keys},angle:mouseAngle,dt:0.05});
+},50);
 
-setInterval(() => {
-    if (!myId || isDead) return;
-    const ks = `${+keys.w}${+keys.a}${+keys.s}${+keys.d}`;
-    if (ks === lastSentKeys && Math.abs(mouseAngle - lastSentAngle) < 0.02) return;
-    lastSentKeys  = ks;
-    lastSentAngle = mouseAngle;
-    socket.emit("player_input", { keys: { ...keys }, angle: mouseAngle, dt: 0.05 });
-}, 50);
+window.addEventListener("keydown",e=>{
+    const k=e.key.toLowerCase();
+    if(k==="w")keys.w=true; else if(k==="a")keys.a=true;
+    else if(k==="s")keys.s=true; else if(k==="d")keys.d=true;
+    if("wasd ".includes(k)) e.preventDefault();
+});
+window.addEventListener("keyup",e=>{
+    const k=e.key.toLowerCase();
+    if(k==="w")keys.w=false; else if(k==="a")keys.a=false;
+    else if(k==="s")keys.s=false; else if(k==="d")keys.d=false;
+});
+window.addEventListener("mousemove",e=>{
+    mouseX=e.clientX; mouseY=e.clientY;
+    if(myId){ crosshair.style.left=mouseX+"px"; crosshair.style.top=mouseY+"px"; }
+    if(!myId) return;
+    // Calcular ángulo respecto a posición predicha local
+    const camRelX = (localReady?localX:0) - camera.x;
+    const camRelY = (localReady?localY:0) - camera.y;
+    mouseAngle=Math.atan2(mouseY-camRelY, mouseX-camRelX);
+});
+window.addEventListener("mousedown",e=>{
+    if(e.button===0&&myId&&!isDead) socket.emit("shoot",{angle:mouseAngle});
+});
 
-window.addEventListener("keydown", e => {
-    const k = e.key.toLowerCase();
-    if (k === "w") keys.w = true;
-    else if (k === "a") keys.a = true;
-    else if (k === "s") keys.s = true;
-    else if (k === "d") keys.d = true;
-    if ("wasd ".includes(k)) e.preventDefault();
-});
-window.addEventListener("keyup", e => {
-    const k = e.key.toLowerCase();
-    if (k === "w") keys.w = false;
-    else if (k === "a") keys.a = false;
-    else if (k === "s") keys.s = false;
-    else if (k === "d") keys.d = false;
-});
-window.addEventListener("mousemove", e => {
-    mouseX = e.clientX; mouseY = e.clientY;
-    if (myId) { crosshair.style.left = mouseX + "px"; crosshair.style.top = mouseY + "px"; }
-    if (!myId || !gameState.p[myId]) return;
-    const me = gameState.p[myId];
-    mouseAngle = Math.atan2(mouseY - (me[1] - camera.y), mouseX - (me[0] - camera.x));
-});
-window.addEventListener("mousedown", e => {
-    if (e.button === 0 && myId && !isDead) socket.emit("shoot", { angle: mouseAngle });
-});
+// ═══════════════════════════════════════════
+// INTERPOLACIÓN entre snapshots
+// Devuelve el estado interpolado para renderizar en el instante "now"
+// El buffer usa tiempo de llegada, retrasado 1 tick para tener siempre
+// un par de snapshots entre los que interpolar.
+// ═══════════════════════════════════════════
+function getInterpolated(now) {
+    if (snapshots.length < 2) {
+        return snapshots.length ? snapshots[snapshots.length-1] : null;
+    }
+    // Momento que queremos renderizar: 1 tick atrás en el tiempo
+    const renderTime = now - INTERP_MS;
+
+    // Buscar los dos snapshots que rodean renderTime
+    let s0 = snapshots[0], s1 = snapshots[1];
+    for (let i=1; i<snapshots.length; i++){
+        if (snapshots[i].ts >= renderTime){ s0=snapshots[i-1]; s1=snapshots[i]; break; }
+        s1 = snapshots[i];
+        if (i===snapshots.length-1) s0=snapshots[i-1];
+    }
+
+    const span = s1.ts - s0.ts;
+    const t    = span > 0 ? Math.min((renderTime - s0.ts) / span, 1) : 1;
+
+    // Interpolar jugadores
+    const p = {};
+    for (const id in s1.p) {
+        const a=s0.p[id], b=s1.p[id];
+        if (!a){ p[id]=b; continue; }
+        // Interpolar solo x,y,angle — hp/team/shape/dead son discretos
+        p[id] = [
+            a[0] + (b[0]-a[0])*t,   // x
+            a[1] + (b[1]-a[1])*t,   // y
+            b[2],                    // hp (último conocido)
+            b[3], b[4], b[5],        // team, shape, dead
+            lerpAngle(a[6], b[6], t) // angle
+        ];
+    }
+
+    // Interpolar proyectiles
+    const bul = {};
+    for (const id in s1.b) {
+        const a=s0.b[id], b=s1.b[id];
+        if (!a){ bul[id]=b; continue; }
+        bul[id]=[a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, b[2],b[3],b[4]];
+    }
+
+    return { p, b: bul };
+}
+
+function lerpAngle(a, b, t) {
+    let d = b - a;
+    while (d >  Math.PI) d -= Math.PI*2;
+    while (d < -Math.PI) d += Math.PI*2;
+    return a + d * t;
+}
 
 // ═══════════════════════════════════════════
 // FOV
 // ═══════════════════════════════════════════
-function inFOV(wx, wy, margin) {
-    const sx = wx - camera.x, sy = wy - camera.y;
-    return sx > -margin && sx < canvas.width + margin && sy > -margin && sy < canvas.height + margin;
+function inFOV(wx,wy,margin){
+    const sx=wx-camera.x, sy=wy-camera.y;
+    return sx>-margin&&sx<canvas.width+margin&&sy>-margin&&sy<canvas.height+margin;
 }
 
 // ═══════════════════════════════════════════
 // RENDER — MAPA
 // ═══════════════════════════════════════════
-function drawMap() {
-    const vw = canvas.width, vh = canvas.height;
-
-    // Fondo sólido
-    ctx.fillStyle = "#13131b";
-    ctx.fillRect(0, 0, vw, vh);
-
-    // Patrón de tiles — se crea una sola vez
+function drawMap(){
+    const vw=canvas.width, vh=canvas.height;
+    ctx.fillStyle="#13131b"; ctx.fillRect(0,0,vw,vh);
     if (!tilePattern) buildTilePattern();
-    const offX = ((-camera.x) % (TILE_SIZE * 2) + TILE_SIZE * 2) % (TILE_SIZE * 2);
-    const offY = ((-camera.y) % (TILE_SIZE * 2) + TILE_SIZE * 2) % (TILE_SIZE * 2);
+    const offX=((- camera.x)%(TILE_SIZE*2)+TILE_SIZE*2)%(TILE_SIZE*2);
+    const offY=((- camera.y)%(TILE_SIZE*2)+TILE_SIZE*2)%(TILE_SIZE*2);
     ctx.save();
-    ctx.translate(offX - TILE_SIZE * 2, offY - TILE_SIZE * 2);
-    ctx.fillStyle = tilePattern;
-    ctx.fillRect(0, 0, vw + TILE_SIZE * 4, vh + TILE_SIZE * 4);
+    ctx.translate(offX-TILE_SIZE*2, offY-TILE_SIZE*2);
+    ctx.fillStyle=tilePattern;
+    ctx.fillRect(0,0,vw+TILE_SIZE*4,vh+TILE_SIZE*4);
     ctx.restore();
-
-    // Borde del mapa
-    ctx.strokeStyle = "rgba(255,255,255,0.07)";
-    ctx.lineWidth = 3;
-    ctx.strokeRect(-camera.x, -camera.y, MAP_WIDTH, MAP_HEIGHT);
-
-    drawSpawnZone(250, 250, "red");
-    drawSpawnZone(MAP_WIDTH - 250, MAP_HEIGHT - 250, "blue");
+    ctx.strokeStyle="rgba(255,255,255,0.07)"; ctx.lineWidth=3;
+    ctx.strokeRect(-camera.x,-camera.y,MAP_WIDTH,MAP_HEIGHT);
+    drawSpawnZone(250,250,"red");
+    drawSpawnZone(MAP_WIDTH-250,MAP_HEIGHT-250,"blue");
 }
 
-function drawSpawnZone(cx, cy, team) {
-    if (!inFOV(cx, cy, 220)) return;
-    const sx = cx - camera.x, sy = cy - camera.y;
-    const color = team === "red" ? "224,48,48" : "32,96,224";
-    ctx.beginPath();
-    ctx.arc(sx, sy, 200, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(${color},0.04)`; ctx.fill();
-    ctx.strokeStyle = `rgba(${color},0.12)`; ctx.lineWidth = 2;
-    ctx.setLineDash([10, 8]); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = `rgba(${color},0.5)`;
-    ctx.font = "bold 11px 'Share Tech Mono',monospace";
-    ctx.textAlign = "center";
-    ctx.fillText(team === "red" ? "SPAWN ROJO" : "SPAWN AZUL", sx, sy);
+function drawSpawnZone(cx,cy,team){
+    if (!inFOV(cx,cy,220)) return;
+    const sx=cx-camera.x, sy=cy-camera.y;
+    const c=team==="red"?"224,48,48":"32,96,224";
+    ctx.beginPath(); ctx.arc(sx,sy,200,0,Math.PI*2);
+    ctx.fillStyle=`rgba(${c},0.04)`; ctx.fill();
+    ctx.strokeStyle=`rgba(${c},0.12)`; ctx.lineWidth=2;
+    ctx.setLineDash([10,8]); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle=`rgba(${c},0.5)`;
+    ctx.font="bold 11px 'Share Tech Mono',monospace"; ctx.textAlign="center";
+    ctx.fillText(team==="red"?"SPAWN ROJO":"SPAWN AZUL",sx,sy);
 }
 
 // ═══════════════════════════════════════════
-// RENDER — TERRENO (desde cache)
+// RENDER — TERRENO
 // ═══════════════════════════════════════════
-function drawTerrain() {
-    if (!terrainCache ||
-        Math.abs(camera.x - cacheCamX) > CACHE_PAD / 2 ||
-        Math.abs(camera.y - cacheCamY) > CACHE_PAD / 2) {
-        rebuildTerrainCache();
-    }
-    // El cache cubre [cacheWorldX .. cacheWorldX+cache.width] en el mundo.
-    // En pantalla, la esquina superior-izquierda del cache está en:
-    const drawX = cacheWorldX - camera.x;
-    const drawY = cacheWorldY - camera.y;
-    ctx.drawImage(terrainCache, drawX, drawY);
+function drawTerrain(){
+    if (!terrainCache||
+        Math.abs(camera.x-cacheCamX)>CACHE_PAD/2||
+        Math.abs(camera.y-cacheCamY)>CACHE_PAD/2) rebuildTerrainCache();
+    ctx.drawImage(terrainCache, cacheWorldX-camera.x, cacheWorldY-camera.y);
 }
 
 // ═══════════════════════════════════════════
-// RENDER — JUGADORES  [x,y,hp,team,shape,dead,angle]
+// RENDER — JUGADORES
 // ═══════════════════════════════════════════
-function drawPlayer(pid, pd) {
-    const [px, py, hp, team, shape, dead, angle] = pd;
-    if (!inFOV(px, py, 40)) return;
-    const sx = px - camera.x, sy = py - camera.y;
-    const r  = 20, isMe = pid === myId;
-    const teamColor  = team === "red" ? "#cc2828" : "#1850cc";
-    const teamBorder = team === "red" ? "#e84444" : "#3d78f5";
-
+function drawPlayer(pid, pd, isLocal){
+    const [px,py,hp,team,shape,dead,angle] = pd;
+    if (!inFOV(px,py,40)) return;
+    const sx=px-camera.x, sy=py-camera.y, r=20;
+    const isMe=(pid===myId);
+    const tc=team==="red"?"#cc2828":"#1850cc";
+    const tb=team==="red"?"#e84444":"#3d78f5";
     ctx.save();
-    ctx.translate(sx, sy);
-    ctx.rotate(angle);
-    if (dead) ctx.globalAlpha = 0.35;
-    ctx.fillStyle   = teamColor;
-    ctx.strokeStyle = isMe ? "rgba(255,255,255,0.9)" : teamBorder;
-    ctx.lineWidth   = isMe ? 2.5 : 1.5;
-
-    if (shape === "circle") {
-        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    } else if (shape === "square") {
-        const s = r * 1.5;
-        ctx.fillRect(-s/2, -s/2, s, s); ctx.strokeRect(-s/2, -s/2, s, s);
+    ctx.translate(sx,sy); ctx.rotate(angle);
+    if (dead) ctx.globalAlpha=0.35;
+    ctx.fillStyle=tc; ctx.strokeStyle=isMe?"rgba(255,255,255,0.9)":tb;
+    ctx.lineWidth=isMe?2.5:1.5;
+    if (shape==="circle"){
+        ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    } else if (shape==="square"){
+        const s=r*1.5; ctx.fillRect(-s/2,-s/2,s,s); ctx.strokeRect(-s/2,-s/2,s,s);
     } else {
-        ctx.beginPath();
-        ctx.moveTo(r, 0); ctx.lineTo(-r*0.7, -r*0.75); ctx.lineTo(-r*0.7, r*0.75);
+        ctx.beginPath(); ctx.moveTo(r,0); ctx.lineTo(-r*.7,-r*.75); ctx.lineTo(-r*.7,r*.75);
         ctx.closePath(); ctx.fill(); ctx.stroke();
     }
-    ctx.globalAlpha = 1;
-    ctx.restore();
-
-    if (!dead) {
-        const barW = 40, barH = 4;
-        const bx = sx - barW/2, by = sy - r - 10;
-        const hpR = hp / 100;
-        ctx.fillStyle = "rgba(0,0,0,0.55)";
-        ctx.fillRect(bx-1, by-1, barW+2, barH+2);
-        ctx.fillStyle = hpR > 0.6 ? "#2ecc71" : hpR > 0.3 ? "#f39c12" : "#e74c3c";
-        ctx.fillRect(bx, by, barW * hpR, barH);
-        if (isMe) {
-            ctx.fillStyle = "rgba(255,255,255,0.6)";
-            ctx.font = "bold 9px 'Share Tech Mono',monospace";
-            ctx.textAlign = "center";
-            ctx.fillText("TU", sx, by - 3);
+    ctx.globalAlpha=1; ctx.restore();
+    if (!dead){
+        const bw=40,bh=4, bx=sx-bw/2, by=sy-r-10, hr=hp/100;
+        ctx.fillStyle="rgba(0,0,0,0.55)"; ctx.fillRect(bx-1,by-1,bw+2,bh+2);
+        ctx.fillStyle=hr>.6?"#2ecc71":hr>.3?"#f39c12":"#e74c3c";
+        ctx.fillRect(bx,by,bw*hr,bh);
+        if (isMe){
+            ctx.fillStyle="rgba(255,255,255,0.6)";
+            ctx.font="bold 9px 'Share Tech Mono',monospace"; ctx.textAlign="center";
+            ctx.fillText("TU",sx,by-3);
         }
     }
 }
 
 // ═══════════════════════════════════════════
-// RENDER — PROYECTILES  [x,y,dx,dy,owner_team]
+// RENDER — PROYECTILES
 // ═══════════════════════════════════════════
-function drawProjectile(bd) {
-    const [bx, by, dx, dy, owner_team] = bd;
-    if (!inFOV(bx, by, 20)) return;
-    const sx = bx - camera.x, sy = by - camera.y;
-    const angle = Math.atan2(dy, dx);
-    ctx.save();
-    ctx.translate(sx, sy); ctx.rotate(angle);
-    ctx.fillStyle = owner_team === "red" ? "#ff6030" : "#30a8ff";
-    ctx.fillRect(-6, -2, 12, 4);
-    ctx.fillStyle = "rgba(255,255,255,0.7)";
-    ctx.fillRect(3, -1, 3, 2);
+function drawProjectile(bd){
+    const [bx,by,dx,dy,ot]=bd;
+    if (!inFOV(bx,by,20)) return;
+    const sx=bx-camera.x, sy=by-camera.y;
+    ctx.save(); ctx.translate(sx,sy); ctx.rotate(Math.atan2(dy,dx));
+    ctx.fillStyle=ot==="red"?"#ff6030":"#30a8ff"; ctx.fillRect(-6,-2,12,4);
+    ctx.fillStyle="rgba(255,255,255,0.7)"; ctx.fillRect(3,-1,3,2);
     ctx.restore();
 }
 
 // ═══════════════════════════════════════════
-// CÁMARA
+// CÁMARA — sigue la posición predicha localmente
 // ═══════════════════════════════════════════
-function updateCamera() {
-    if (!myId || !gameState.p[myId]) return;
-    const [px, py] = gameState.p[myId];
-    camera.x = Math.max(0, Math.min(MAP_WIDTH  - canvas.width,  px - canvas.width  / 2));
-    camera.y = Math.max(0, Math.min(MAP_HEIGHT - canvas.height, py - canvas.height / 2));
+function updateCamera(){
+    let cx, cy;
+    if (localReady) {
+        cx = localX; cy = localY;
+    } else if (myId && snapshots.length) {
+        const last = snapshots[snapshots.length-1];
+        if (last.p[myId]){ cx=last.p[myId][0]; cy=last.p[myId][1]; }
+        else return;
+    } else return;
+    camera.x=Math.max(0,Math.min(MAP_WIDTH -canvas.width,  cx-canvas.width /2));
+    camera.y=Math.max(0,Math.min(MAP_HEIGHT-canvas.height, cy-canvas.height/2));
+}
+
+// ═══════════════════════════════════════════
+// CLIENT-SIDE PREDICTION del jugador local
+// Simula el movimiento en el cliente para que
+// la cámara y la posición propia sean 100% fluidas
+// sin esperar al servidor.
+// ═══════════════════════════════════════════
+const PLAYER_SPEED_CLIENT = 250;
+function updateLocalPlayer(dt){
+    if (!myId || isDead) return;
+    // Inicializar desde el último snapshot si aún no tenemos posición
+    if (!localReady && snapshots.length){
+        const last=snapshots[snapshots.length-1];
+        if (last.p[myId]){ localX=last.p[myId][0]; localY=last.p[myId][1]; localReady=true; }
+        return;
+    }
+    if (!localReady) return;
+    let dx=0, dy=0;
+    if(keys.w)dy-=1; if(keys.s)dy+=1; if(keys.a)dx-=1; if(keys.d)dx+=1;
+    if(dx&&dy){ dx*=0.7071; dy*=0.7071; }
+    localX = Math.max(20, Math.min(MAP_WIDTH -20, localX+dx*PLAYER_SPEED_CLIENT*dt));
+    localY = Math.max(20, Math.min(MAP_HEIGHT-20, localY+dy*PLAYER_SPEED_CLIENT*dt));
 }
 
 // ═══════════════════════════════════════════
 // DEATH TIMER
 // ═══════════════════════════════════════════
-function updateDeathTimer(dt) {
+function updateDeathTimer(dt){
     if (!isDead) return;
-    deathTimer = Math.max(0, deathTimer - dt);
-    const sec = Math.ceil(deathTimer);
-    deathTimerEl.textContent = sec > 0 ? "Reapareciendo en " + sec + "..." : "Reapareciendo...";
+    deathTimer=Math.max(0,deathTimer-dt);
+    const s=Math.ceil(deathTimer);
+    deathTimerEl.textContent=s>0?"Reapareciendo en "+s+"...":"Reapareciendo...";
 }
 
 // ═══════════════════════════════════════════
-// GAME LOOP
+// GAME LOOP — 60 fps en el cliente, 10 ticks en el servidor
 // ═══════════════════════════════════════════
-function gameLoop(now) {
-    const dt = Math.min((now - lastTime) / 1000, 0.05);
-    lastTime = now;
+function gameLoop(now){
+    const dt=Math.min((now-lastTime)/1000, 0.05);
+    lastTime=now;
 
+    updateLocalPlayer(dt);
     updateCamera();
     updateDeathTimer(dt);
+
+    // Estado interpolado para renderizar
+    const state = getInterpolated(now);
+
     drawMap();
     drawTerrain();
 
-    for (const bid in gameState.b) drawProjectile(gameState.b[bid]);
+    if (state){
+        for (const bid in state.b) drawProjectile(state.b[bid]);
 
-    for (const pid in gameState.p) {
-        if (pid !== myId) drawPlayer(pid, gameState.p[pid]);
+        for (const pid in state.p){
+            if (pid!==myId) drawPlayer(pid, state.p[pid]);
+        }
+        // Jugador propio: usar posición predicha localmente (suave)
+        if (myId && state.p[myId]){
+            const sp = state.p[myId];
+            const renderPd = [
+                localReady ? localX : sp[0],
+                localReady ? localY : sp[1],
+                sp[2],sp[3],sp[4],sp[5],mouseAngle
+            ];
+            drawPlayer(myId, renderPd);
+        }
     }
-    if (myId && gameState.p[myId]) drawPlayer(myId, gameState.p[myId]);
 
     requestAnimationFrame(gameLoop);
 }
