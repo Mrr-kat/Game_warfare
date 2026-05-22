@@ -2,9 +2,9 @@
 
 const socket = io();
 
-const MAP_WIDTH = 5000;
-const MAP_HEIGHT = 5000;
-const TILE_SIZE = 100;
+const MAP_WIDTH = 3000;
+const MAP_HEIGHT = 3000;
+const TILE_SIZE = 250;
 
 // Campo de vision:
 const FOV_MARGIN = 80;
@@ -301,7 +301,7 @@ setInterval(() => {
         angle: mouseAngle,
         dt: 0.016
     });
-}, 16);
+}, 50);
 
 // ------------------
 // campo de vision
