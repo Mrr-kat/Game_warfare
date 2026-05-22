@@ -2,11 +2,11 @@
 
 const socket = io({ transports: ["websocket"] });
 
-const MAP_WIDTH  = 5000;
-const MAP_HEIGHT = 5000;
+const MAP_WIDTH  = 4000;
+const MAP_HEIGHT = 4000;
 const TILE_SIZE  = 200;
 const FOV_MARGIN = 80;
-const SERVER_HZ  = 10;          // ticks del servidor
+const SERVER_HZ  = 20;          // ticks del servidor
 const INTERP_MS  = 1000 / SERVER_HZ;  // 100ms de buffer de interpolación
 
 let myId    = null;
