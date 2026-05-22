@@ -15,8 +15,8 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading",
                     max_http_buffer_size=500_000,
                     logger=False, engineio_logger=False)
 
-MAP_WIDTH  = 5000
-MAP_HEIGHT = 5000
+MAP_WIDTH  = 4000
+MAP_HEIGHT = 4000
 
 RED_SPAWN  = {"x": 200,  "y": 200}
 BLUE_SPAWN = {"x": 4800, "y": 4800}
@@ -34,7 +34,7 @@ PROJECTILE_RADIUS = 6   # la mitad de PROJECTILE_WIDTH
 HIT_DIST_SQ       = (PLAYER_RADIUS + PROJECTILE_RADIUS) ** 2
 
 # ── 10 ticks/s: suficiente para física autoritativa, CPU ~2× menor que 20 ticks
-TICK_RATE = 10
+TICK_RATE = 20
 
 players     = {}
 projectiles = {}
