@@ -188,30 +188,29 @@ socket.on("joined", data => {
 });
 
 socket.on("game_state", data => {
-    gameState = data;
 
-    let redCount = 0;
-    let blueCount = 0;
-    for (const pid in data.players) {
-        if (data.players[pid].team === "red") redCount++;
-        else blueCount++;
-    }
-    document.getElementById("red-count").textContent = redCount;
-    document.getElementById("blue-count").textContent = blueCount;
+    for (const id in data.players) {
 
-    if (myId && data.players[myId]) {
-        const me = data.players[myId];
-        const hp = Math.max(0, me.hp);
-        healthFill.style.width = hp + "%";
-        healthText.textContent = hp;
-        if (hp > 60) {
-            healthFill.style.background = "linear-gradient(90deg,#2ecc71,#27ae60)";
-        } else if (hp > 30) {
-            healthFill.style.background = "linear-gradient(90deg,#f39c12,#e67e22)";
-        } else {
-            healthFill.style.background = "linear-gradient(90deg,#e74c3c,#c0392b)";
+        const newPlayer = data.players[id];
+
+        if (!gameState.players[id]) {
+            gameState.players[id] = newPlayer;
+            continue;
         }
+
+        const old = gameState.players[id];
+
+        old.targetX = newPlayer.x;
+        old.targetY = newPlayer.y;
+
+        old.hp = newPlayer.hp;
+        old.team = newPlayer.team;
+        old.shape = newPlayer.shape;
+        old.dead = newPlayer.dead;
+        old.angle = newPlayer.angle;
     }
+
+    gameState.projectiles = data.projectiles;
 });
 
 socket.on("player_died", data => {
@@ -301,7 +300,7 @@ setInterval(() => {
         angle: mouseAngle,
         dt: 0.016
     });
-}, 50);
+}, 16);
 
 // ------------------
 // campo de vision
@@ -529,6 +528,16 @@ function updateDeathTimer(dt) {
 // GAME LOOP
 // -----------
 function gameLoop(now) {
+    for (const id in gameState.players) {
+
+    const p = gameState.players[id];
+
+    if (p.targetX !== undefined) {
+
+        p.x += (p.targetX - p.x) * 0.25;
+        p.y += (p.targetY - p.y) * 0.25;
+       }
+    }
     const dt = Math.min((now - lastTime) / 1000, 0.05);
     lastTime = now;
 
