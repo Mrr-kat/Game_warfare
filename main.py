@@ -9,8 +9,8 @@ app = Flask(__name__, static_folder="static", template_folder=".")
 app.config["SECRET_KEY"] = "battleground2025"
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
-MAP_WIDTH = 5000
-MAP_HEIGHT = 5000
+MAP_WIDTH = 3000
+MAP_HEIGHT = 3000
 
 RED_SPAWN = {"x": 200, "y": 200}
 BLUE_SPAWN = {"x": 4800, "y": 4800}
@@ -27,7 +27,7 @@ PLAYER_RADIUS = 20
 PROJECTILE_WIDTH = 12
 PROJECTILE_HEIGHT = 6
 
-TICK_RATE = 60
+TICK_RATE = 20
 
 players = {}
 projectiles = {}
@@ -248,34 +248,58 @@ def game_loop():
                     plr["dead_timer"] = 0
                     socketio.emit("player_respawned", {"id": plr_id})
 
-        state = {
-            "players": {
-                pid: {
-                    "id": plr["id"],
-                    "x": plr["x"],
-                    "y": plr["y"],
-                    "hp": plr["hp"],
-                    "team": plr["team"],
-                    "shape": plr["shape"],
-                    "dead": plr["dead"],
-                    "angle": plr.get("angle", 0)
-                }
-                for pid, plr in players.items()
-            },
-            "projectiles": {
-                pid: {
-                    "id": proj["id"],
-                    "x": proj["x"],
-                    "y": proj["y"],
-                    "dx": proj["dx"],
-                    "dy": proj["dy"],
-                    "owner_team": proj["owner_team"],
-                    "damage": proj["damage"]
-                }
-                for pid, proj in projectiles.items()
+        VISION_DISTANCE = 1200
+
+    for sid, current_player in players.items():
+    
+        visible_players = {}
+        visible_projectiles = {}
+    
+        # jugadores cercanos
+        for pid, plr in players.items():
+    
+            dx = plr["x"] - current_player["x"]
+            dy = plr["y"] - current_player["y"]
+    
+            if dx * dx + dy * dy > VISION_DISTANCE * VISION_DISTANCE:
+                continue
+    
+            visible_players[pid] = {
+                "id": plr["id"],
+                "x": plr["x"],
+                "y": plr["y"],
+                "hp": plr["hp"],
+                "team": plr["team"],
+                "shape": plr["shape"],
+                "dead": plr["dead"],
+                "angle": plr.get("angle", 0)
             }
+    
+        # proyectiles cercanos
+        for proj_id, proj in projectiles.items():
+    
+            dx = proj["x"] - current_player["x"]
+            dy = proj["y"] - current_player["y"]
+    
+            if dx * dx + dy * dy > VISION_DISTANCE * VISION_DISTANCE:
+                continue
+    
+            visible_projectiles[proj_id] = {
+                "id": proj["id"],
+                "x": proj["x"],
+                "y": proj["y"],
+                "dx": proj["dx"],
+                "dy": proj["dy"],
+                "owner_team": proj["owner_team"],
+                "damage": proj["damage"]
+            }
+    
+        player_specific_state = {
+            "players": visible_players,
+            "projectiles": visible_projectiles
         }
-        socketio.emit("game_state", state)
+    
+        socketio.emit("game_state", player_specific_state, to=sid)
 
         elapsed = time.time() - loop_start
         sleep_time = tick_interval - elapsed
