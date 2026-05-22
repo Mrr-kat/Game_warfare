@@ -7,7 +7,7 @@ import os
 
 app = Flask(__name__, static_folder="static", template_folder=".")
 app.config["SECRET_KEY"] = "battleground2025"
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 MAP_WIDTH = 5000
 MAP_HEIGHT = 5000
