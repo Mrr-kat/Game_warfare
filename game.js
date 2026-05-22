@@ -5,8 +5,8 @@ const socket = io({ transports: ["websocket"], reconnectionAttempts: 5 });
 const MAP_WIDTH  = 4000;
 const MAP_HEIGHT = 4000;
 const TILE_SIZE  = 200;
-const FOV_MARGIN = 60; // Reducido de 80 para mejor rendimiento
-const SERVER_HZ  = 15; // Coincide con servidor
+const FOV_MARGIN = 60;
+const SERVER_HZ  = 20; // Aumentado a 20Hz para mejor respuesta
 const INTERP_MS  = 1000 / SERVER_HZ;
 
 let myId    = null;
@@ -18,19 +18,25 @@ let qualityReduced = false;
 let frameCount = 0;
 let lastFPSUpdate = 0;
 let currentFPS = 60;
-let inputInterval = null;
 
 let keys = { w: false, a: false, s: false, d: false };
 let mouseAngle = 0;
 let mouseX = 0, mouseY = 0;
 
+// MEJORA: Sistema de predicción con historial
 let localX = 0, localY = 0;
 let localReady = false;
+let lastProcessedSeq = 0;
+let inputQueue = []; // Guardar inputs no procesados
+let lastServerPos = { x: 0, y: 0 };
+let reconciliationStrength = 0.15; // Reducido para menos tirón
 
 let camera   = { x: 0, y: 0 };
 let lastTime = performance.now();
 let deathTimer = 0;
 let isDead   = false;
+let lastSentTime = 0;
+let inputSequence = 0;
 
 const canvas = document.getElementById("game-canvas");
 const ctx    = canvas.getContext("2d", { alpha: false });
@@ -45,7 +51,7 @@ const crosshair    = document.getElementById("crosshair");
 const deathTimerEl = document.getElementById("death-timer-text");
 
 // ═══════════════════════════════════════════
-// TERRENO (Reducido para mejor rendimiento)
+// TERRENO (Reducido)
 // ═══════════════════════════════════════════
 const TERRAIN_SEED = 42;
 let terrainObjects = [];
@@ -58,20 +64,17 @@ function seededRandom(seed) {
 function generateTerrain() {
     const rng = seededRandom(TERRAIN_SEED);
     terrainObjects = [];
-    // Reducido de 70 a 40 rocas
     for(let i=0;i<40;i++){
         const x=rng()*MAP_WIDTH, y=rng()*MAP_HEIGHT;
         const w=40+rng()*70, h=28+rng()*50;
         rng();
         terrainObjects.push({type:"rock",x,y,r:(w+h)/4});
     }
-    // Reducido de 100 a 60 bushes
     for(let i=0;i<60;i++){
         const x=rng()*MAP_WIDTH, y=rng()*MAP_HEIGHT, r=16+rng()*24;
         rng();rng();rng();
         terrainObjects.push({type:"bush",x,y,r});
     }
-    // Reducido de 50 a 30 crates
     for(let i=0;i<30;i++){
         const x=rng()*MAP_WIDTH, y=rng()*MAP_HEIGHT, size=22+rng()*14;
         rng();
@@ -83,7 +86,7 @@ generateTerrain();
 // ═══════════════════════════════════════════
 // CACHE DE TERRENO
 // ═══════════════════════════════════════════
-const CACHE_PAD = 250; // Reducido de 300
+const CACHE_PAD = 250;
 let terrainCache = null, cacheCamX = -99999, cacheCamY = -99999;
 let cacheWorldX  = 0, cacheWorldY = 0;
 
@@ -126,10 +129,6 @@ function rebuildTerrainCache() {
     cacheCamY = camera.y;
 }
 
-// ═══════════════════════════════════════════
-// TILE PATTERN
-// ═══════════════════════════════════════════
-let tilePattern = null;
 function buildTilePattern() {
     const tc = document.createElement("canvas");
     tc.width = TILE_SIZE*2;
@@ -141,8 +140,10 @@ function buildTilePattern() {
     c.fillStyle = "#111119";
     c.fillRect(TILE_SIZE, 0, TILE_SIZE, TILE_SIZE);
     c.fillRect(0, TILE_SIZE, TILE_SIZE, TILE_SIZE);
-    tilePattern = ctx.createPattern(tc, "repeat");
+    return ctx.createPattern(tc, "repeat");
 }
+
+let tilePattern = null;
 
 function resizeCanvas() {
     canvas.width = window.innerWidth;
@@ -192,27 +193,35 @@ socket.on("joined", data => {
     el.textContent = myTeam === "red" ? "BANDO ROJO" : "BANDO AZUL";
     el.className = myTeam === "red" ? "red-team-text" : "blue-team-text";
     lastTime = performance.now();
-    
-    // Configurar intervalo de input optimizado
-    if (inputInterval) clearInterval(inputInterval);
-    inputInterval = setInterval(() => {
-        if (!myId || isDead) return;
-        const ks = `${+keys.w}${+keys.a}${+keys.s}${+keys.d}`;
-        if (ks === lastSentKeys && Math.abs(mouseAngle - lastSentAngle) < 0.02) return;
-        lastSentKeys = ks;
-        lastSentAngle = mouseAngle;
-        socket.emit("player_input", { keys: { ...keys }, angle: mouseAngle, dt: 0.05 });
-    }, 66); // ~15 veces por segundo (reducido de 50ms)
-    
     requestAnimationFrame(gameLoop);
 });
 
-let lastSentKeys = "";
-let lastSentAngle = 0;
+// INPUT: Enviar a 30Hz para mejor respuesta (cada 33ms)
+setInterval(() => {
+    if (!myId || isDead || !localReady) return;
+    
+    const now = Date.now();
+    if (now - lastSentTime < 33) return; // 30Hz máximo
+    lastSentTime = now;
+    
+    inputSequence++;
+    const input = {
+        seq: inputSequence,
+        keys: { w: keys.w, a: keys.a, s: keys.s, d: keys.d },
+        angle: mouseAngle,
+        dt: 0.033
+    };
+    
+    // Guardar para posible reenvío
+    inputQueue.push(input);
+    if (inputQueue.length > 10) inputQueue.shift();
+    
+    socket.emit("player_input", input);
+}, 33);
 
 socket.on("game_state", data => {
     const ts = performance.now();
-    snapshots.push({ ts, p: data.p, b: data.b });
+    snapshots.push({ ts, p: data.p, b: data.b, seq: data.seq || 0 });
     if (snapshots.length > 3) snapshots.shift();
     
     let rc = 0, bc = 0;
@@ -223,6 +232,60 @@ socket.on("game_state", data => {
     document.getElementById("red-count").textContent = rc;
     document.getElementById("blue-count").textContent = bc;
     
+    // RECONCILIACIÓN MEJORADA
+    if (myId && data.p[myId] && localReady && !isDead) {
+        const srvX = data.p[myId][0];
+        const srvY = data.p[myId][1];
+        const srvSeq = data.p[myId][7] || 0; // Secuencia del servidor
+        
+        // Calcular error de posición
+        const errorX = srvX - localX;
+        const errorY = srvY - localY;
+        const errorDist = Math.sqrt(errorX*errorX + errorY*errorY);
+        
+        // Solo corregir si el error es significativo (>10px)
+        if (errorDist > 10) {
+            // Corrección suave pero efectiva
+            localX += errorX * reconciliationStrength;
+            localY += errorY * reconciliationStrength;
+            
+            // Si el error es muy grande, corregir inmediatamente
+            if (errorDist > 50) {
+                localX = srvX;
+                localY = srvY;
+            }
+        }
+        
+        // Actualizar última posición del servidor
+        lastServerPos = { x: srvX, y: srvY };
+        
+        // Re-aplicar inputs no procesados (re-predicción)
+        if (srvSeq > lastProcessedSeq) {
+            lastProcessedSeq = srvSeq;
+            // Limpiar inputs ya procesados
+            inputQueue = inputQueue.filter(inp => inp.seq > srvSeq);
+            // Re-aplicar los inputs pendientes
+            for (const inp of inputQueue) {
+                const dt = Math.min(inp.dt, 0.033);
+                let dx = 0, dy = 0;
+                if (inp.keys.w) dy -= 1;
+                if (inp.keys.s) dy += 1;
+                if (inp.keys.a) dx -= 1;
+                if (inp.keys.d) dx += 1;
+                if (dx && dy) {
+                    dx *= 0.7071;
+                    dy *= 0.7071;
+                }
+                localX += dx * 250 * dt;
+                localY += dy * 250 * dt;
+                // Clamp
+                localX = Math.max(20, Math.min(MAP_WIDTH - 20, localX));
+                localY = Math.max(20, Math.min(MAP_HEIGHT - 20, localY));
+            }
+        }
+    }
+    
+    // Actualizar HP
     if (myId && data.p[myId]) {
         const hp = Math.max(0, data.p[myId][2]);
         healthFill.style.width = hp + "%";
@@ -230,11 +293,6 @@ socket.on("game_state", data => {
         healthFill.style.background = hp > 60 ? "linear-gradient(90deg,#2ecc71,#27ae60)" :
                                       hp > 30 ? "linear-gradient(90deg,#f39c12,#e67e22)" :
                                                 "linear-gradient(90deg,#e74c3c,#c0392b)";
-        if (localReady && !isDead) {
-            const srvX = data.p[myId][0], srvY = data.p[myId][1];
-            localX += (srvX - localX) * 0.3; // Aumentado de 0.2 para mejor reconciliación
-            localY += (srvY - localY) * 0.3;
-        }
     }
 });
 
@@ -246,6 +304,7 @@ socket.on("player_died", data => {
         document.getElementById("death-by-text").textContent =
             data.killer_id && data.killer_id !== data.id ? "Eliminado por un enemigo" : "";
         deathTimerEl.textContent = "Reapareciendo en 3...";
+        localReady = false;
     }
     addKillFeed(data.killer_team, data.victim_team);
 });
@@ -255,9 +314,10 @@ socket.on("player_respawned", data => {
         isDead = false;
         localReady = false;
         deathOverlay.classList.add("hidden");
+        inputQueue = [];
+        lastProcessedSeq = 0;
     }
 });
-socket.on("player_left", () => {});
 
 function addKillFeed(kt, vt) {
     const e = document.createElement("div");
@@ -271,7 +331,7 @@ function addKillFeed(kt, vt) {
 }
 
 // ═══════════════════════════════════════════
-// INPUT
+// INPUT EVENTOS
 // ═══════════════════════════════════════════
 window.addEventListener("keydown", e => {
     const k = e.key.toLowerCase();
@@ -295,13 +355,15 @@ window.addEventListener("mousemove", e => {
         crosshair.style.left = mouseX + "px";
         crosshair.style.top = mouseY + "px";
     }
-    if (!myId) return;
-    const camRelX = (localReady ? localX : 0) - camera.x;
-    const camRelY = (localReady ? localY : 0) - camera.y;
+    if (!myId || !localReady) return;
+    const camRelX = localX - camera.x;
+    const camRelY = localY - camera.y;
     mouseAngle = Math.atan2(mouseY - camRelY, mouseX - camRelX);
 });
 window.addEventListener("mousedown", e => {
-    if (e.button === 0 && myId && !isDead) socket.emit("shoot", { angle: mouseAngle });
+    if (e.button === 0 && myId && !isDead && localReady) {
+        socket.emit("shoot", { angle: mouseAngle });
+    }
 });
 
 // ═══════════════════════════════════════════
@@ -360,9 +422,6 @@ function lerpAngle(a, b, t) {
     return a + d * t;
 }
 
-// ═══════════════════════════════════════════
-// FOV
-// ═══════════════════════════════════════════
 function inFOV(wx, wy, margin) {
     const sx = wx - camera.x, sy = wy - camera.y;
     return sx > -margin && sx < canvas.width + margin && sy > -margin && sy < canvas.height + margin;
@@ -375,7 +434,7 @@ function drawMap() {
     const vw = canvas.width, vh = canvas.height;
     ctx.fillStyle = "#13131b";
     ctx.fillRect(0, 0, vw, vh);
-    if (!tilePattern) buildTilePattern();
+    if (!tilePattern) tilePattern = buildTilePattern();
     const offX = ((-camera.x) % (TILE_SIZE*2) + TILE_SIZE*2) % (TILE_SIZE*2);
     const offY = ((-camera.y) % (TILE_SIZE*2) + TILE_SIZE*2) % (TILE_SIZE*2);
     ctx.save();
@@ -480,40 +539,53 @@ function drawProjectile(bd) {
 }
 
 // ═══════════════════════════════════════════
-// CÁMARA
+// CÁMARA - sigue posición local suavemente
 // ═══════════════════════════════════════════
 function updateCamera() {
-    let cx, cy;
-    if (localReady) {
-        cx = localX;
-        cy = localY;
-    } else if (myId && snapshots.length) {
-        const last = snapshots[snapshots.length-1];
-        if (last.p[myId]) {
-            cx = last.p[myId][0];
-            cy = last.p[myId][1];
-        } else return;
-    } else return;
-    camera.x = Math.max(0, Math.min(MAP_WIDTH - canvas.width, cx - canvas.width/2));
-    camera.y = Math.max(0, Math.min(MAP_HEIGHT - canvas.height, cy - canvas.height/2));
+    if (!localReady) {
+        if (myId && snapshots.length) {
+            const last = snapshots[snapshots.length-1];
+            if (last.p[myId]) {
+                camera.x = Math.max(0, Math.min(MAP_WIDTH - canvas.width, last.p[myId][0] - canvas.width/2));
+                camera.y = Math.max(0, Math.min(MAP_HEIGHT - canvas.height, last.p[myId][1] - canvas.height/2));
+            }
+        }
+        return;
+    }
+    
+    // Cámara sigue la posición local con suavizado
+    const targetX = Math.max(0, Math.min(MAP_WIDTH - canvas.width, localX - canvas.width/2));
+    const targetY = Math.max(0, Math.min(MAP_HEIGHT - canvas.height, localY - canvas.height/2));
+    
+    // Movimiento de cámara suave (para no marear)
+    camera.x += (targetX - camera.x) * 0.1;
+    camera.y += (targetY - camera.y) * 0.1;
 }
 
 // ═══════════════════════════════════════════
-// CLIENT-SIDE PREDICTION
+// CLIENT-SIDE PREDICTION mejorada
 // ═══════════════════════════════════════════
 const PLAYER_SPEED_CLIENT = 250;
+let lastMoveTime = 0;
+
 function updateLocalPlayer(dt) {
     if (!myId || isDead) return;
+    
+    // Inicializar desde servidor
     if (!localReady && snapshots.length) {
         const last = snapshots[snapshots.length-1];
         if (last.p[myId]) {
             localX = last.p[myId][0];
             localY = last.p[myId][1];
+            lastServerPos = { x: localX, y: localY };
             localReady = true;
+            lastMoveTime = performance.now();
         }
         return;
     }
     if (!localReady) return;
+    
+    // Predicción de movimiento local
     let dx = 0, dy = 0;
     if (keys.w) dy -= 1;
     if (keys.s) dy += 1;
@@ -523,13 +595,15 @@ function updateLocalPlayer(dt) {
         dx *= 0.7071;
         dy *= 0.7071;
     }
-    localX = Math.max(20, Math.min(MAP_WIDTH - 20, localX + dx * PLAYER_SPEED_CLIENT * dt));
-    localY = Math.max(20, Math.min(MAP_HEIGHT - 20, localY + dy * PLAYER_SPEED_CLIENT * dt));
+    
+    // Aplicar movimiento
+    const moveX = dx * PLAYER_SPEED_CLIENT * dt;
+    const moveY = dy * PLAYER_SPEED_CLIENT * dt;
+    
+    localX = Math.max(20, Math.min(MAP_WIDTH - 20, localX + moveX));
+    localY = Math.max(20, Math.min(MAP_HEIGHT - 20, localY + moveY));
 }
 
-// ═══════════════════════════════════════════
-// DEATH TIMER
-// ═══════════════════════════════════════════
 function updateDeathTimer(dt) {
     if (!isDead) return;
     deathTimer = Math.max(0, deathTimer - dt);
@@ -537,15 +611,10 @@ function updateDeathTimer(dt) {
     deathTimerEl.textContent = s > 0 ? "Reapareciendo en " + s + "..." : "Reapareciendo...";
 }
 
-// ═══════════════════════════════════════════
-// CONTROL DE CALIDAD
-// ═══════════════════════════════════════════
 function reduceQuality() {
     if (qualityReduced) return;
     qualityReduced = true;
-    // Reducir distancia de renderizado
     window.FOV_MARGIN = 50;
-    // Limpiar caché de terreno más agresivamente
     terrainCache = null;
     cacheCamX = -99999;
 }
@@ -554,18 +623,17 @@ function reduceQuality() {
 // GAME LOOP
 // ═══════════════════════════════════════════
 function gameLoop(now) {
-    const dt = Math.min((now - lastTime) / 1000, 0.05);
+    let dt = Math.min((now - lastTime) / 1000, 0.033); // Limitar a 33ms max
+    if (dt < 0.001) dt = 0.016; // Default 60fps
     lastTime = now;
     
-    // Monitoreo de FPS
+    // FPS monitor
     frameCount++;
     if (now - lastFPSUpdate >= 1000) {
         currentFPS = frameCount;
         frameCount = 0;
         lastFPSUpdate = now;
-        if (currentFPS < 25 && !qualityReduced) {
-            reduceQuality();
-        }
+        if (currentFPS < 25 && !qualityReduced) reduceQuality();
     }
     
     updateLocalPlayer(dt);
@@ -582,11 +650,10 @@ function gameLoop(now) {
         for (const pid in state.p) {
             if (pid !== myId) drawPlayer(pid, state.p[pid]);
         }
-        if (myId && state.p[myId]) {
+        if (myId && state.p[myId] && localReady) {
             const sp = state.p[myId];
             const renderPd = [
-                localReady ? localX : sp[0],
-                localReady ? localY : sp[1],
+                localX, localY,  // Usar posición predicha local
                 sp[2], sp[3], sp[4], sp[5], mouseAngle
             ];
             drawPlayer(myId, renderPd);
