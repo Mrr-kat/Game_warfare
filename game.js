@@ -2,8 +2,8 @@
 
 const socket = io();
 
-const MAP_WIDTH = 3000;
-const MAP_HEIGHT = 3000;
+const MAP_WIDTH = 5000;
+const MAP_HEIGHT = 5000;
 const TILE_SIZE = 250;
 
 // Campo de vision:
