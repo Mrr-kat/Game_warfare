@@ -17,34 +17,32 @@
         <div class="lobby-glow blue"></div>
     </div>
 
-    <!-- Las dos mitades de equipo solo cubren la parte superior -->
-    <div class="lobby-layout">
-        <div class="team-selection-container">
-            <button id="select-red" class="team-half red-side" data-team="red">
-                <div class="team-content">
-                    <div class="team-icon-large">R</div>
-                    <div class="team-name">ROJO</div>
-                    <div class="team-desc">wacamole</div>
-                </div>
-            </button>
-            <button id="select-blue" class="team-half blue-side" data-team="blue">
-                <div class="team-content">
-                    <div class="team-icon-large">A</div>
-                    <div class="team-name">AZUL</div>
-                    <div class="team-desc">Arroz</div>
-                </div>
-            </button>
-        </div>
+    <div class="team-selection-container">
+        <button id="select-red" class="team-half red-side" data-team="red">
+            <div class="team-content">
+                <div class="team-icon-large">R</div>
+                <div class="team-name">ROJO</div>
+                <div class="team-desc">wacamole</div>
+            </div>
+        </button>
+        <button id="select-blue" class="team-half blue-side" data-team="blue">
+            <div class="team-content">
+                <div class="team-icon-large">A</div>
+                <div class="team-name">AZUL</div>
+                <div class="team-desc">Arroz</div>
+            </div>
+        </button>
+    </div>
 
-        <!-- Zona inferior: nombre + botón, completamente libre de otros elementos -->
-        <div class="join-zone">
+    <div class="join-container">
+        <div class="name-input-wrap">
             <input id="name-input" class="name-input" type="text" maxlength="16"
-                   placeholder="Tu nombre" autocomplete="off" spellcheck="false" />
-            <button id="join-btn" class="join-button">
-                <span class="join-text">ENTRAR AL CAMPO</span>
-                <div class="join-arrow"></div>
-            </button>
+                   placeholder="TU NOMBRE" autocomplete="off" spellcheck="false" />
         </div>
+        <button id="join-btn" class="join-button">
+            <span class="join-text">ENTRAR AL CAMPO</span>
+            <div class="join-arrow"></div>
+        </button>
     </div>
 </div>
 
@@ -91,15 +89,10 @@
 
     <!-- Leaderboard panel -->
     <div id="leaderboard-panel" class="hidden">
-        <div class="lb-title">🏆 Top Kills</div>
+        <div class="lb-title">TOP KILLS</div>
         <table class="lb-table">
             <thead>
-                <tr>
-                    <th>#</th>
-                    <th>Jugador</th>
-                    <th>Equipo</th>
-                    <th>Kills</th>
-                </tr>
+                <tr><th>#</th><th>JUGADOR</th><th>EQUIPO</th><th>KILLS</th></tr>
             </thead>
             <tbody id="lb-body"></tbody>
         </table>
@@ -115,6 +108,7 @@
         </div>
     </div>
 
+    <!-- Pantalla de victoria -->
     <div id="victory-overlay" class="hidden">
         <div id="victory-message">
             <div class="victory-title" id="victory-title">¡VICTORIA!</div>
