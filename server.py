@@ -7,47 +7,40 @@ import os
 
 app = Flask(__name__, static_folder="static", template_folder=".")
 app.config["SECRET_KEY"] = "battleground2025"
-app.config['SESSION_TYPE'] = 'filesystem'
 
-# Configuración para producción en Railway
+# Configuración simple sin especificar async_mode
 socketio = SocketIO(app, 
-                    cors_allowed_origins="*", 
-                    async_mode="eventlet",  # Usar eventlet para producción
+                    cors_allowed_origins="*",
                     ping_timeout=60, 
-                    ping_interval=25,
-                    max_http_buffer_size=1e6)
+                    ping_interval=25)
 
-# MAPA REDUCIDO para mejor performance en Railway free
-MAP_WIDTH = 3000
+# MAPA REDUCIDO
+MAP_WIDTH = 3000  # Reducido aún más para Railway free
 MAP_HEIGHT = 3000
 
 RED_SPAWN = {"x": 150, "y": 150}
-BLUE_SPAWN = {"x": 2850, "y": 2850}
+BLUE_SPAWN = {"x": 2350, "y": 2350}
 
-# Stats de formas (balanceadas)
+# Stats de formas
 SHAPE_DAMAGE = {"circle": 18, "square": 12, "triangle": 14}
 SHAPE_FIRE_RATE = {"circle": 0.8, "square": 0.9, "triangle": 0.35}
 SHAPE_PROJECTILE_COUNT = {"circle": 1, "square": 2, "triangle": 1}
 SHAPE_SPREAD = {"circle": 0.0, "square": 0.2, "triangle": 0.0}
 
-PROJECTILE_SPEED = 550
-PROJECTILE_LIFETIME = 2.5
-PLAYER_SPEED = 250
+PROJECTILE_SPEED = 500
+PROJECTILE_LIFETIME = 2.0
+PLAYER_SPEED = 220
 PLAYER_RADIUS = 20
 PROJECTILE_WIDTH = 10
-PROJECTILE_HEIGHT = 5
 
-TICK_RATE = 30
+TICK_RATE = 25  # Reducido a 25 FPS para Railway
 GAME_TICK = 1.0 / TICK_RATE
 
 players = {}
 projectiles = {}
 last_update = time.time()
 
-# Cache para broadcast
-last_broadcast_state = {}
-
-# Terreno reducido
+# Terreno reducido al mínimo
 TERRAIN_SEED = 42
 
 def seeded_random_gen(seed):
@@ -61,36 +54,36 @@ def generate_solid_obstacles():
     rng = seeded_random_gen(TERRAIN_SEED)
     obstacles = []
 
-    # 40 rocas
-    for i in range(40):
-        x = rng() * MAP_WIDTH
-        y = rng() * MAP_HEIGHT
-        w = 40 + rng() * 60   
-        h = 28 + rng() * 40   
-        r = (w + h) / 4       
-        obstacles.append({"type": "rock", "x": x, "y": y, "r": r})
-
-    # 30 cajas
+    # Solo 30 rocas (reducido)
     for i in range(30):
         x = rng() * MAP_WIDTH
         y = rng() * MAP_HEIGHT
-        size = 22 + rng() * 14
+        w = 35 + rng() * 50   
+        h = 25 + rng() * 35   
+        r = (w + h) / 4       
+        obstacles.append({"type": "rock", "x": x, "y": y, "r": r})
+
+    # Solo 20 cajas (reducido)
+    for i in range(20):
+        x = rng() * MAP_WIDTH
+        y = rng() * MAP_HEIGHT
+        size = 20 + rng() * 12
         half = size / 2
         obstacles.append({"type": "crate", "x": x, "y": y, "rw": half, "rh": half})
 
     return obstacles
 
 solid_obstacles = generate_solid_obstacles()
-print(f"[INFO] {len(solid_obstacles)} solid obstacles generated (optimized)")
+print(f"[INFO] {len(solid_obstacles)} solid obstacles generated")
 
 def get_spawn(team):
     import random
     if team == "red":
-        return {"x": RED_SPAWN["x"] + random.randint(-60, 60),
-                "y": RED_SPAWN["y"] + random.randint(-60, 60)}
+        return {"x": RED_SPAWN["x"] + random.randint(-50, 50),
+                "y": RED_SPAWN["y"] + random.randint(-50, 50)}
     else:
-        return {"x": BLUE_SPAWN["x"] + random.randint(-60, 60),
-                "y": BLUE_SPAWN["y"] + random.randint(-60, 60)}
+        return {"x": BLUE_SPAWN["x"] + random.randint(-50, 50),
+                "y": BLUE_SPAWN["y"] + random.randint(-50, 50)}
 
 def clamp(val, min_val, max_val):
     return max(min_val, min(max_val, val))
@@ -278,7 +271,7 @@ def game_loop():
         elapsed = time.time() - loop_start
         sleep_time = tick_interval - elapsed
         if sleep_time > 0:
-            socketio.sleep(min(sleep_time, 0.033))
+            time.sleep(min(sleep_time, 0.033))
 
 @app.route("/")
 def index():
@@ -329,7 +322,7 @@ def on_join(data):
         "map_width": MAP_WIDTH,
         "map_height": MAP_HEIGHT
     })
-    print(f"Player joined: [{team}] [{shape}] - Total players: {len(players)}")
+    print(f"Player joined: [{team}] [{shape}] - Total: {len(players)}")
 
 @socketio.on("player_input")
 def on_input(data):
@@ -405,23 +398,21 @@ def on_disconnect():
     if sid in players:
         del players[sid]
         emit("player_left", {"id": sid}, broadcast=True)
-        print(f"Player disconnected: {sid} - Total players: {len(players)}")
+        print(f"Player disconnected: {sid} - Total: {len(players)}")
 
 if __name__ == "__main__":
-    print(f"Starting server on Railway with optimized settings...")
-    print(f"Map size: {MAP_WIDTH}x{MAP_HEIGHT}")
+    print("=" * 50)
+    print("BATTLEGROUND SERVER STARTING")
+    print("=" * 50)
+    print(f"Map: {MAP_WIDTH}x{MAP_HEIGHT}")
     print(f"Tick rate: {TICK_RATE} Hz")
     print(f"Obstacles: {len(solid_obstacles)}")
+    print("=" * 50)
     
-    # Iniciar el game loop en background
-    socketio.start_background_task(game_loop)
+    # Iniciar game loop en background
+    import threading
+    game_thread = threading.Thread(target=game_loop, daemon=True)
+    game_thread.start()
     
-    # Obtener puerto de Railway o usar 5000 por defecto
     port = int(os.environ.get("PORT", 5000))
-    
-    # Usar eventlet para producción - esta es la forma correcta
-    socketio.run(app, 
-                 host="0.0.0.0", 
-                 port=port, 
-                 debug=False,
-                 use_reloader=False)
+    socketio.run(app, host="0.0.0.0", port=port, debug=False)
