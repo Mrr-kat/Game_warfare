@@ -329,7 +329,7 @@ html, body {
     width: 150px; height: 14px;
     background: rgba(255,255,255,0.05);
     border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 1px;
+    border-radius: 7px;
     overflow: hidden;
 }
 #health-bar-fill {
@@ -337,7 +337,7 @@ html, body {
     width: 100%;
     background: linear-gradient(90deg, #2ecc71, #27ae60);
     transition: width 0.15s, background 0.3s;
-    border-radius: 0;
+    border-radius: 7px;
 }
 #health-bar-text {
     position: absolute;
@@ -476,8 +476,8 @@ html, body {
 
 .lb-rank  { color: var(--text-dim); font-size: 10px; width: 22px; font-weight: 600; }
 .lb-name  { max-width: 95px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.lb-team-red  { color: var(--red-light);  font-size: 9px; font-weight: 700; letter-spacing: 0.5px; }
-.lb-team-blue { color: var(--blue-light); font-size: 9px; font-weight: 700; letter-spacing: 0.5px; }
+.lb-team-red  { color: var(--red-light)  !important; font-size: 9px; font-weight: 700; letter-spacing: 0.5px; }
+.lb-team-blue { color: var(--blue-light) !important; font-size: 9px; font-weight: 700; letter-spacing: 0.5px; }
 .lb-kills { color: var(--accent); font-weight: 700; font-size: 13px; text-align: right; }
 
 /* ─── KILL FEED ─── */
