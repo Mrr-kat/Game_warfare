@@ -11,14 +11,17 @@ const socket = io({
 const MAP_WIDTH = 2500;
 const MAP_HEIGHT = 2500;
 const TILE_SIZE = 70;
-
 const FOV_MARGIN = 100;
 
 let myId = null;
 let myTeam = null;
 let myShape = null;
 
+// Estado autoritativo del servidor
+let serverState = { players: {}, projectiles: {} };
+// Estado interpolado que se renderiza
 let gameState = { players: {}, projectiles: {} };
+
 let keys = { w: false, a: false, s: false, d: false };
 let mouseAngle = 0;
 let mouseX = 0;
@@ -30,13 +33,24 @@ let lastTime = performance.now();
 let deathTimer = 0;
 let isDead = false;
 
-// Variables para FPS y Ping
+// --- CLIENT-SIDE PREDICTION ---
+// Posición local predicha del jugador propio
+let localPlayer = { x: 0, y: 0, angle: 0 };
+// Velocidad del jugador (sincronizada con el servidor)
+const PLAYER_SPEED = 280;
+const PLAYER_RADIUS = 20;
+
+// --- INTERPOLACIÓN DE ENTIDADES REMOTAS ---
+// Buffer de snapshots del servidor para interpolar otros jugadores
+const INTERP_DELAY = 100; // ms de delay para interpolación (2-3 ticks de 30Hz)
+let stateBuffer = []; // [{ time, players, projectiles }]
+
+// --- FPS / PING ---
 let fps = 60;
 let ping = 0;
-let lastPingTime = 0;
+let lastPingRequest = 0;
 let frameTimes = [];
 let lastFrameTime = performance.now();
-let lastPingRequest = 0;
 
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d", { alpha: false });
@@ -49,7 +63,7 @@ const healthFill = document.getElementById("health-bar-fill");
 const healthText = document.getElementById("health-bar-text");
 const crosshair = document.getElementById("crosshair");
 
-// Crear monitor de rendimiento
+// Monitor de rendimiento
 const performanceDiv = document.createElement("div");
 performanceDiv.id = "performance-monitor";
 performanceDiv.style.cssText = `
@@ -69,7 +83,7 @@ performanceDiv.style.cssText = `
 `;
 document.body.appendChild(performanceDiv);
 
-// TERRENO DECORATIVO (70 objetos totales)
+// TERRENO
 const TERRAIN_SEED = 42;
 let terrainObjects = [];
 
@@ -84,36 +98,19 @@ function seededRandom(seed) {
 function generateTerrain() {
     const rng = seededRandom(TERRAIN_SEED);
     terrainObjects = [];
-
-    // 35 rocas
     for (let i = 0; i < 35; i++) {
         const x = rng() * MAP_WIDTH;
         const y = rng() * MAP_HEIGHT;
         const w = 35 + rng() * 55;
         const h = 25 + rng() * 35;
-        terrainObjects.push({
-            type: "rock",
-            x, y,
-            r: (w + h) / 4,
-            color: "#4a4a52"
-        });
+        terrainObjects.push({ type: "rock", x, y, r: (w + h) / 4, color: "#4a4a52" });
     }
-
-    // 35 arbustos (solo decorativos)
     for (let i = 0; i < 35; i++) {
         const x = rng() * MAP_WIDTH;
         const y = rng() * MAP_HEIGHT;
         const r = 14 + rng() * 20;
-        terrainObjects.push({
-            type: "bush",
-            x, y,
-            r,
-            color: "#2d6e2d"
-        });
+        terrainObjects.push({ type: "bush", x, y, r, color: "#2d6e2d" });
     }
-    
-    // NOTA: Las cajas NO se generan como decorativas en el cliente
-    // porque ya están en el servidor como obstáculos sólidos
 }
 
 function resizeCanvas() {
@@ -125,7 +122,7 @@ window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 generateTerrain();
 
-// Medir ping periódicamente
+// Ping
 setInterval(() => {
     if (myId) {
         lastPingRequest = Date.now();
@@ -137,73 +134,46 @@ socket.on("pong_response", () => {
     ping = Date.now() - lastPingRequest;
 });
 
-// Calcular FPS
 function updatePerformance() {
     const now = performance.now();
     const delta = now - lastFrameTime;
     lastFrameTime = now;
-    
     frameTimes.push(delta);
     if (frameTimes.length > 60) frameTimes.shift();
-    
     const avgDelta = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
     fps = Math.round(1000 / avgDelta);
-    
-    const pingColor = ping < 100 ? "#0f0" : (ping < 200 ? "#ff0" : "#f00");
+    const pingColor = ping < 100 ? "#0f0" : ping < 200 ? "#ff0" : "#f00";
     performanceDiv.innerHTML = `FPS: ${fps} | PING: <span style="color:${pingColor}">${ping}ms</span>`;
 }
 
 // LOBBY
 let selectedTeam = "red";
-
 const redHalf = document.getElementById("select-red");
 const blueHalf = document.getElementById("select-blue");
 const joinBtn = document.getElementById("join-btn");
 
 function updateTeamSelectionUI(team) {
     if (team === "red") {
-        if (redHalf) redHalf.classList.add("selected");
-        if (blueHalf) blueHalf.classList.remove("selected");
+        redHalf && redHalf.classList.add("selected");
+        blueHalf && blueHalf.classList.remove("selected");
     } else {
-        if (blueHalf) blueHalf.classList.add("selected");
-        if (redHalf) redHalf.classList.remove("selected");
+        blueHalf && blueHalf.classList.add("selected");
+        redHalf && redHalf.classList.remove("selected");
     }
 }
 
-if (redHalf) {
-    redHalf.addEventListener("click", () => {
-        selectedTeam = "red";
-        updateTeamSelectionUI("red");
-    });
-}
-
-if (blueHalf) {
-    blueHalf.addEventListener("click", () => {
-        selectedTeam = "blue";
-        updateTeamSelectionUI("blue");
-    });
-}
-
+redHalf && redHalf.addEventListener("click", () => { selectedTeam = "red"; updateTeamSelectionUI("red"); });
+blueHalf && blueHalf.addEventListener("click", () => { selectedTeam = "blue"; updateTeamSelectionUI("blue"); });
 updateTeamSelectionUI(selectedTeam);
 
-function setLobbyCursor() {
-    document.body.style.cursor = "default";
-    if (crosshair) crosshair.style.display = "none";
-}
-
-function setGameCursor() {
-    document.body.style.cursor = "none";
-    if (crosshair) crosshair.style.display = "block";
-}
-
+function setLobbyCursor() { document.body.style.cursor = "default"; crosshair && (crosshair.style.display = "none"); }
+function setGameCursor() { document.body.style.cursor = "none"; crosshair && (crosshair.style.display = "block"); }
 setLobbyCursor();
 
-if (joinBtn) {
-    joinBtn.addEventListener("click", () => {
-        myTeam = selectedTeam;
-        socket.emit("join_game", { team: selectedTeam });
-    });
-}
+joinBtn && joinBtn.addEventListener("click", () => {
+    myTeam = selectedTeam;
+    socket.emit("join_game", { team: selectedTeam });
+});
 
 // EVENTOS DE RED
 socket.on("joined", data => {
@@ -213,12 +183,10 @@ socket.on("joined", data => {
 
     lobbySel.classList.remove("active");
     gameSel.classList.add("active");
-
     setGameCursor();
 
     const shapeNames = { circle: "CIRCULO", square: "CUADRADO", triangle: "TRIANGULO" };
     document.getElementById("player-shape-hud").textContent = shapeNames[myShape] || myShape.toUpperCase();
-
     const teamEl = document.getElementById("player-team-hud");
     teamEl.textContent = myTeam === "red" ? "BANDO ROJO" : "BANDO AZUL";
     teamEl.className = myTeam === "red" ? "red-team-text" : "blue-team-text";
@@ -227,16 +195,22 @@ socket.on("joined", data => {
     requestAnimationFrame(gameLoop);
 });
 
-// Rate limiting para updates de UI
 let lastScoreUpdate = 0;
 
 socket.on("game_state", data => {
-    gameState = data;
-    
+    serverState = data;
+
+    // Guardar snapshot con timestamp para interpolación
     const now = Date.now();
+    stateBuffer.push({ time: now, players: data.players, projectiles: data.projectiles });
+    // Mantener solo 1 segundo de buffer
+    while (stateBuffer.length > 2 && stateBuffer[stateBuffer.length - 1].time - stateBuffer[0].time > 1000) {
+        stateBuffer.shift();
+    }
+
+    // Actualizar UI del marcador con throttle
     if (now - lastScoreUpdate > 200) {
-        let redCount = 0;
-        let blueCount = 0;
+        let redCount = 0, blueCount = 0;
         for (const pid in data.players) {
             if (data.players[pid].team === "red") redCount++;
             else blueCount++;
@@ -246,11 +220,31 @@ socket.on("game_state", data => {
         lastScoreUpdate = now;
     }
 
+    // Sincronizar localPlayer con el servidor (corrección suave)
     if (myId && data.players[myId]) {
         const me = data.players[myId];
         const hp = Math.max(0, me.hp);
         healthFill.style.width = hp + "%";
         healthText.textContent = hp;
+
+        // Corrección de predicción: si hay mucha divergencia, snap; si poca, lerp suave
+        if (!isDead) {
+            const dx = me.x - localPlayer.x;
+            const dy = me.y - localPlayer.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 80) {
+                // Divergencia grande: snap inmediato
+                localPlayer.x = me.x;
+                localPlayer.y = me.y;
+            } else if (dist > 2) {
+                // Divergencia pequeña: corrección suave (30% hacia servidor)
+                localPlayer.x += dx * 0.3;
+                localPlayer.y += dy * 0.3;
+            }
+        } else {
+            localPlayer.x = me.x;
+            localPlayer.y = me.y;
+        }
     }
 });
 
@@ -282,16 +276,13 @@ function addKillFeedEntry(killerTeam, victimTeam) {
     const vLabel = victimTeam === "red" ? "ROJO" : "AZUL";
     entry.innerHTML = `<span style="color:${kColor}">${kLabel}</span><span class="symbol"> + </span><span style="color:${vColor}">${vLabel}</span>`;
     killFeed.appendChild(entry);
-    setTimeout(() => {
-        entry.style.opacity = "0";
-        setTimeout(() => entry.remove(), 500);
-    }, 3000);
+    setTimeout(() => { entry.style.opacity = "0"; setTimeout(() => entry.remove(), 500); }, 3000);
     while (killFeed.children.length > 5) killFeed.removeChild(killFeed.firstChild);
 }
 
-// INPUT
+// INPUT - se envía cada 16ms (60Hz) con dt real
 let lastInputTime = 0;
-const INPUT_INTERVAL = 1000 / 40;
+let lastInputSendTime = performance.now();
 
 window.addEventListener("keydown", e => {
     const k = e.key.toLowerCase();
@@ -313,17 +304,13 @@ window.addEventListener("keyup", e => {
 window.addEventListener("mousemove", e => {
     mouseX = e.clientX;
     mouseY = e.clientY;
-
     if (myId && crosshair) {
         crosshair.style.left = mouseX + "px";
         crosshair.style.top = mouseY + "px";
     }
-
-    if (!myId || !gameState.players[myId]) return;
-    const me = gameState.players[myId];
-    const screenX = me.x - camera.x;
-    const screenY = me.y - camera.y;
-    mouseAngle = Math.atan2(mouseY - screenY, mouseX - screenX);
+    const sx = localPlayer.x - camera.x;
+    const sy = localPlayer.y - camera.y;
+    mouseAngle = Math.atan2(mouseY - sy, mouseX - sx);
 });
 
 window.addEventListener("mousedown", e => {
@@ -333,19 +320,96 @@ window.addEventListener("mousedown", e => {
     e.preventDefault();
 });
 
+// Enviar input al servidor a 20Hz (suficiente para Railway free, 50ms interval)
+// El movimiento local se predice a 60fps independientemente
+const SERVER_INPUT_HZ = 20;
+const SERVER_INPUT_INTERVAL = 1000 / SERVER_INPUT_HZ;
+
 setInterval(() => {
     if (!myId || isDead) return;
-    const now = Date.now();
-    if (now - lastInputTime >= INPUT_INTERVAL) {
-        socket.emit("player_input", {
-            keys: { ...keys },
-            angle: mouseAngle,
-            dt: 0.025
-        });
-        lastInputTime = now;
-    }
-}, INPUT_INTERVAL);
+    socket.emit("player_input", {
+        keys: { ...keys },
+        angle: mouseAngle,
+        dt: SERVER_INPUT_INTERVAL / 1000  // dt real del intervalo de envío
+    });
+}, SERVER_INPUT_INTERVAL);
 
+// --- PREDICCIÓN DEL CLIENTE ---
+// Mueve al jugador local exactamente igual que el servidor, sin esperar respuesta
+function clamp(val, min, max) { return Math.max(min, Math.min(max, val)); }
+
+function predictLocalMovement(dt) {
+    if (!myId || isDead) return;
+
+    let dx = 0, dy = 0;
+    if (keys.w) dy -= 1;
+    if (keys.s) dy += 1;
+    if (keys.a) dx -= 1;
+    if (keys.d) dx += 1;
+
+    if (dx !== 0 && dy !== 0) {
+        const len = Math.sqrt(dx * dx + dy * dy);
+        dx /= len; dy /= len;
+    }
+
+    localPlayer.x = clamp(localPlayer.x + dx * PLAYER_SPEED * dt, PLAYER_RADIUS, MAP_WIDTH - PLAYER_RADIUS);
+    localPlayer.y = clamp(localPlayer.y + dy * PLAYER_SPEED * dt, PLAYER_RADIUS, MAP_HEIGHT - PLAYER_RADIUS);
+    localPlayer.angle = mouseAngle;
+}
+
+// --- INTERPOLACIÓN DE ENTIDADES REMOTAS ---
+// Retorna el estado interpolado entre dos snapshots para un tiempo dado
+function getInterpolatedState(renderTime) {
+    if (stateBuffer.length < 2) {
+        return stateBuffer.length > 0 ? stateBuffer[stateBuffer.length - 1] : null;
+    }
+
+    // Buscar dos snapshots entre los que interpolar
+    let older = null, newer = null;
+    for (let i = stateBuffer.length - 1; i >= 0; i--) {
+        if (stateBuffer[i].time <= renderTime) {
+            older = stateBuffer[i];
+            newer = stateBuffer[i + 1] || stateBuffer[i];
+            break;
+        }
+    }
+    if (!older) return stateBuffer[0];
+    if (older === newer) return older;
+
+    const t = (renderTime - older.time) / (newer.time - older.time);
+    const alpha = Math.max(0, Math.min(1, t));
+
+    // Interpolar posiciones de jugadores remotos
+    const interpPlayers = {};
+    for (const pid in newer.players) {
+        if (pid === myId) continue; // el propio jugador usa predicción local
+        const np = newer.players[pid];
+        const op = older.players[pid];
+        if (!op) { interpPlayers[pid] = np; continue; }
+        interpPlayers[pid] = {
+            ...np,
+            x: op.x + (np.x - op.x) * alpha,
+            y: op.y + (np.y - op.y) * alpha,
+        };
+    }
+
+    // Interpolar proyectiles
+    const interpProj = {};
+    for (const pid in newer.projectiles) {
+        const np = newer.projectiles[pid];
+        const op = older.projectiles[pid];
+        if (!op) { interpProj[pid] = np; continue; }
+        interpProj[pid] = {
+            ...np,
+            x: op.x + (np.x - op.x) * alpha,
+            y: op.y + (np.y - op.y) * alpha,
+        };
+    }
+
+    return { players: interpPlayers, projectiles: interpProj };
+}
+
+// TERRENO
 function inFOV(wx, wy, margin) {
     const m = margin || FOV_MARGIN;
     const sx = wx - camera.x;
@@ -354,11 +418,7 @@ function inFOV(wx, wy, margin) {
 }
 
 function drawMap() {
-    const vx = camera.x;
-    const vy = camera.y;
-    const vw = canvas.width;
-    const vh = canvas.height;
-
+    const vx = camera.x, vy = camera.y, vw = canvas.width, vh = canvas.height;
     ctx.fillStyle = "#13131b";
     ctx.fillRect(0, 0, vw, vh);
 
@@ -386,10 +446,8 @@ function drawMap() {
 
 function drawSpawnZone(cx, cy, team) {
     if (!inFOV(cx, cy, 220)) return;
-    const sx = cx - camera.x;
-    const sy = cy - camera.y;
+    const sx = cx - camera.x, sy = cy - camera.y;
     const color = team === "red" ? "224,48,48" : "32,96,224";
-
     ctx.beginPath();
     ctx.arc(sx, sy, 160, 0, Math.PI * 2);
     ctx.fillStyle = `rgba(${color},0.04)`;
@@ -399,7 +457,6 @@ function drawSpawnZone(cx, cy, team) {
     ctx.setLineDash([10, 8]);
     ctx.stroke();
     ctx.setLineDash([]);
-
     ctx.fillStyle = `rgba(${color},0.5)`;
     ctx.font = "bold 11px 'Share Tech Mono',monospace";
     ctx.textAlign = "center";
@@ -409,12 +466,8 @@ function drawSpawnZone(cx, cy, team) {
 function drawTerrain() {
     for (const obj of terrainObjects) {
         if (!inFOV(obj.x, obj.y, 100)) continue;
-
-        const sx = obj.x - camera.x;
-        const sy = obj.y - camera.y;
-
+        const sx = obj.x - camera.x, sy = obj.y - camera.y;
         ctx.fillStyle = obj.color;
-
         if (obj.type === "rock") {
             ctx.beginPath();
             ctx.arc(sx, sy, obj.r, 0, Math.PI * 2);
@@ -430,24 +483,24 @@ function drawTerrain() {
     }
 }
 
-function drawPlayer(plr) {
-    if (!inFOV(plr.x, plr.y, 50)) return;
+function drawPlayer(plr, isLocal) {
+    const px = isLocal ? localPlayer.x : plr.x;
+    const py = isLocal ? localPlayer.y : plr.y;
+    const pangle = isLocal ? localPlayer.angle : plr.angle;
 
-    const sx = plr.x - camera.x;
-    const sy = plr.y - camera.y;
+    if (!inFOV(px, py, 50)) return;
+    const sx = px - camera.x, sy = py - camera.y;
     const r = 18;
-    const isMe = plr.id === myId;
+    const isMe = isLocal;
 
     const teamColor = plr.team === "red" ? "#cc2828" : "#1850cc";
     const teamBorder = plr.team === "red" ? "#e84444" : "#3d78f5";
 
     ctx.save();
     ctx.translate(sx, sy);
-    ctx.rotate(plr.angle);
+    ctx.rotate(pangle);
 
-    if (plr.dead) {
-        ctx.globalAlpha = 0.35;
-    }
+    if (plr.dead) ctx.globalAlpha = 0.35;
 
     ctx.fillStyle = teamColor;
     ctx.strokeStyle = isMe ? "rgba(255,255,255,0.9)" : teamBorder;
@@ -476,18 +529,13 @@ function drawPlayer(plr) {
     ctx.restore();
 
     if (!plr.dead) {
-        const barW = 38;
-        const barH = 4;
-        const bx = sx - barW / 2;
-        const by = sy - r - 8;
+        const barW = 38, barH = 4;
+        const bx = sx - barW / 2, by = sy - r - 8;
         const hpRatio = plr.hp / 100;
-
         ctx.fillStyle = "rgba(0,0,0,0.55)";
         ctx.fillRect(bx - 1, by - 1, barW + 2, barH + 2);
-
         ctx.fillStyle = hpRatio > 0.6 ? "#2ecc71" : hpRatio > 0.3 ? "#f39c12" : "#e74c3c";
         ctx.fillRect(bx, by, barW * hpRatio, barH);
-
         if (isMe) {
             ctx.fillStyle = "rgba(255,255,255,0.6)";
             ctx.font = "bold 9px 'Share Tech Mono',monospace";
@@ -499,12 +547,9 @@ function drawPlayer(plr) {
 
 function drawProjectile(proj) {
     if (!inFOV(proj.x, proj.y, 30)) return;
-
-    const sx = proj.x - camera.x;
-    const sy = proj.y - camera.y;
+    const sx = proj.x - camera.x, sy = proj.y - camera.y;
     const angle = Math.atan2(proj.dy, proj.dx);
     const color = proj.owner_team === "red" ? "#ff6030" : "#30a8ff";
-
     ctx.save();
     ctx.translate(sx, sy);
     ctx.rotate(angle);
@@ -516,12 +561,14 @@ function drawProjectile(proj) {
 }
 
 function updateCamera() {
-    if (!myId || !gameState.players[myId]) return;
-    const me = gameState.players[myId];
-    const tx = me.x - canvas.width / 2;
-    const ty = me.y - canvas.height / 2;
-    camera.x = Math.max(0, Math.min(MAP_WIDTH - canvas.width, tx));
-    camera.y = Math.max(0, Math.min(MAP_HEIGHT - canvas.height, ty));
+    const tx = localPlayer.x - canvas.width / 2;
+    const ty = localPlayer.y - canvas.height / 2;
+    // Cámara suavizada (lerp) para menos tirones
+    const lerpSpeed = 0.15;
+    const targetX = Math.max(0, Math.min(MAP_WIDTH - canvas.width, tx));
+    const targetY = Math.max(0, Math.min(MAP_HEIGHT - canvas.height, ty));
+    camera.x += (targetX - camera.x) * lerpSpeed;
+    camera.y += (targetY - camera.y) * lerpSpeed;
 }
 
 function updateDeathTimer(dt) {
@@ -529,47 +576,56 @@ function updateDeathTimer(dt) {
     deathTimer = Math.max(0, deathTimer - dt);
     const sec = Math.ceil(deathTimer);
     const timerEl = document.getElementById("death-timer-text");
-    if (timerEl) {
-        timerEl.textContent = sec > 0 ? "Reapareciendo en " + sec + "..." : "Reapareciendo...";
-    }
+    if (timerEl) timerEl.textContent = sec > 0 ? "Reapareciendo en " + sec + "..." : "Reapareciendo...";
 }
 
-let lastFrameRender = 0;
-const TARGET_FPS = 60;
-const FRAME_INTERVAL = 1000 / TARGET_FPS;
-
+// GAME LOOP — corre a 60fps sin ningún throttle adicional
 function gameLoop(now) {
     requestAnimationFrame(gameLoop);
-    
-    const delta = now - lastFrameRender;
-    if (delta < FRAME_INTERVAL) return;
-    
-    lastFrameRender = now - (delta % FRAME_INTERVAL);
+
     const dt = Math.min((now - lastTime) / 1000, 0.05);
     lastTime = now;
 
     updatePerformance();
-    updateCamera();
+
+    // 1. Predicción local: mover al jugador propio a 60fps
+    if (myId && !isDead) {
+        predictLocalMovement(dt);
+    }
+
+    // 2. Obtener estado interpolado de entidades remotas
+    const renderTime = Date.now() - INTERP_DELAY;
+    const interp = getInterpolatedState(renderTime);
+
+    // 3. Actualizar cámara basada en posición local predicha
+    if (myId) updateCamera();
+
     updateDeathTimer(dt);
 
+    // 4. Dibujar
     drawMap();
     drawTerrain();
 
-    for (const pid in gameState.projectiles) {
-        drawProjectile(gameState.projectiles[pid]);
+    // Proyectiles del estado interpolado
+    if (interp) {
+        for (const pid in interp.projectiles) {
+            drawProjectile(interp.projectiles[pid]);
+        }
+
+        // Jugadores remotos (interpolados)
+        for (const pid in interp.players) {
+            if (pid === myId) continue;
+            drawPlayer(interp.players[pid], false);
+        }
     }
 
-    const players = Object.values(gameState.players);
-    for (const plr of players) {
-        if (plr.id !== myId) drawPlayer(plr);
-    }
-    if (myId && gameState.players[myId]) {
-        drawPlayer(gameState.players[myId]);
+    // Jugador local (predicción)
+    if (myId && serverState.players[myId]) {
+        drawPlayer(serverState.players[myId], true);
     }
 }
 
 window.addEventListener('load', () => {
     lastTime = performance.now();
-    lastFrameRender = performance.now();
     lastFrameTime = performance.now();
 });
