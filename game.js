@@ -19,7 +19,7 @@ let myId = null;
 let myTeam = null;
 let myShape = null;
 let myName = "";
-let killsToWin = 50;
+let killsToWin = 20;
 
 let serverState = { players: {}, projectiles: {}, team_kills: { red: 0, blue: 0 } };
 let stateBuffer = [];
@@ -148,6 +148,29 @@ function updateTeamKillsHUD(tk) {
     teamKills = tk;
     document.getElementById("red-kills").textContent = tk.red;
     document.getElementById("blue-kills").textContent = tk.blue;
+    
+    // Actualizar contadores de jugadores por equipo
+    let redCount = 0;
+    let blueCount = 0;
+    if (serverState && serverState.players) {
+        for (const pid in serverState.players) {
+            const p = serverState.players[pid];
+            if (p && !p.dead) {
+                if (p.team === "red") redCount++;
+                else if (p.team === "blue") blueCount++;
+            }
+        }
+    }
+    // También incluir jugadores muertos para conteo total
+    for (const pid in players) {
+        const p = players[pid];
+        if (p && p.dead) {
+            if (p.team === "red") redCount++;
+            else if (p.team === "blue") blueCount++;
+        }
+    }
+    document.getElementById("red-count").textContent = redCount;
+    document.getElementById("blue-count").textContent = blueCount;
 }
 
 function buildVictoryBoard(lb) {
@@ -208,7 +231,7 @@ socket.on("joined", data => {
     myTeam = data.team;
     myShape = data.shape;
     myName = data.name;
-    killsToWin = data.kills_to_win || 50;
+    killsToWin = data.kills_to_win || 20; // Cambiado a 20 por defecto
 
     localPlayer.x = data.x;
     localPlayer.y = data.y;
@@ -240,6 +263,18 @@ socket.on("game_state", data => {
     }
 
     if (data.team_kills) updateTeamKillsHUD(data.team_kills);
+    
+    // Actualizar contadores de jugadores por equipo
+    let redCount = 0, blueCount = 0;
+    for (const pid in data.players) {
+        const p = data.players[pid];
+        if (p && !p.dead) {
+            if (p.team === "red") redCount++;
+            else if (p.team === "blue") blueCount++;
+        }
+    }
+    document.getElementById("red-count").textContent = redCount;
+    document.getElementById("blue-count").textContent = blueCount;
 
     if (myId && data.players[myId]) {
         const me = data.players[myId];
