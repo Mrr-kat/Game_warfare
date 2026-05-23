@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=Share+Tech+Mono&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Share+Tech+Mono&display=swap');
 
 *, *::before, *::after {
     box-sizing: border-box;
@@ -27,7 +27,7 @@ html, body {
     height: 100%;
     overflow: hidden;
     background: var(--bg-dark);
-    font-family: 'Rajdhani', sans-serif;
+    font-family: 'Space Grotesk', sans-serif;
     color: var(--text);
     cursor: default;
 }
@@ -88,7 +88,7 @@ html, body {
     transition: all 0.2s ease;
     cursor: pointer;
     background: transparent;
-    font-family: 'Rajdhani', sans-serif;
+    font-family: 'Space Grotesk', sans-serif;
     border: none;
 }
 
@@ -170,7 +170,7 @@ html, body {
 }
 
 .team-desc {
-    font-family: 'Rajdhani', sans-serif;
+    font-family: 'Space Grotesk', sans-serif;
     font-size: 11px;
     letter-spacing: 2px;
     color: var(--text-dim);
@@ -185,8 +185,10 @@ html, body {
     right: 0;
     display: flex;
     justify-content: center;
+    align-items: center;
+    gap: 20px;
     z-index: 20;
-    pointer-events: none;
+    pointer-events: auto;
 }
 
 .join-button {
@@ -196,7 +198,7 @@ html, body {
     border: 1px solid rgba(255,255,255,0.25);
     border-radius: 50px;
     padding: 14px 42px;
-    font-family: 'Rajdhani', sans-serif;
+    font-family: 'Space Grotesk', sans-serif;
     font-size: 22px;
     font-weight: 700;
     letter-spacing: 5px;
@@ -229,6 +231,40 @@ html, body {
     transform: translateX(4px);
 }
 
+/* Campo de nombre - FIXED */
+.name-input-wrap {
+    pointer-events: auto;
+}
+
+.name-input {
+    background: rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 50px;
+    padding: 12px 28px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 3px;
+    color: white;
+    text-align: center;
+    text-transform: uppercase;
+    outline: none;
+    width: 280px;
+    transition: border-color 0.2s;
+    cursor: text;
+    pointer-events: auto;
+}
+
+.name-input::placeholder { 
+    color: rgba(255,255,255,0.25); 
+    letter-spacing: 3px;
+    font-weight: 500;
+}
+.name-input:focus { 
+    border-color: var(--accent); 
+    box-shadow: 0 0 12px rgba(240,192,64,0.2);
+}
+
 /* Decoración estática (sin animación) */
 .lobby-glow {
     position: absolute;
@@ -248,7 +284,269 @@ html, body {
     left: auto;
 }
 
-/* Mantener estilos de juego (sin cambios) */
+/* Game screen y HUD */
+#game-screen {
+    background: #111118;
+}
+
+#game-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+#hud {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 100;
+    display: flex;
+    align-items: flex-start;
+    padding: 14px;
+    gap: 14px;
+}
+
+#hud-left {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 220px;
+}
+
+#hud-right {
+    min-width: 120px;
+    display: flex;
+    justify-content: flex-end;
+    align-items: flex-start;
+}
+
+#player-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+#player-name-hud {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: white;
+    font-family: 'Space Grotesk', sans-serif;
+}
+
+#player-shape-hud {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    color: var(--accent);
+    font-family: 'Space Grotesk', sans-serif;
+}
+
+#player-team-hud {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 10px;
+    letter-spacing: 3px;
+}
+
+.red-team-text { color: var(--red-light); }
+.blue-team-text { color: var(--blue-light); }
+
+#health-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.health-label {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    flex-shrink: 0;
+}
+
+.health-bar-bg {
+    position: relative;
+    width: 160px;
+    height: 16px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+#health-bar-fill {
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(90deg, #2ecc71, #27ae60);
+    transition: width 0.15s, background 0.3s;
+}
+
+#health-bar-text {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    color: white;
+}
+
+#hud-center {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+}
+
+#score-board {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    background: rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    overflow: hidden;
+    backdrop-filter: blur(4px);
+}
+
+.score-team {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 20px;
+    gap: 12px;
+}
+
+.red-score-block { background: rgba(224,48,48,0.12); }
+.blue-score-block { background: rgba(32,96,224,0.12); }
+
+.team-count {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.score-label {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+}
+
+.score-count {
+    font-size: 26px;
+    font-weight: 800;
+    line-height: 1;
+    font-family: 'Space Grotesk', sans-serif;
+}
+
+.red-score-block .score-count { color: var(--red-light); }
+.blue-score-block .score-count { color: var(--blue-light); }
+
+.score-separator {
+    width: 1px;
+    height: 45px;
+    background: rgba(255,255,255,0.1);
+}
+
+#kill-feed {
+    position: fixed;
+    top: 100px;
+    right: 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    pointer-events: none;
+    z-index: 100;
+}
+
+.kill-entry {
+    background: rgba(0,0,0,0.75);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 4px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    font-family: 'Space Grotesk', sans-serif;
+    animation: feed-in 0.2s ease;
+    transition: opacity 0.5s;
+}
+
+@keyframes feed-in {
+    from { transform: translateX(20px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+.kill-entry .symbol { color: var(--accent); margin: 0 6px; }
+
+#death-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    backdrop-filter: blur(4px);
+}
+
+#death-message {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    animation: death-pop 0.3s ease;
+}
+
+@keyframes death-pop {
+    from { transform: scale(0.8); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+
+.death-title {
+    font-size: 64px;
+    font-weight: 800;
+    letter-spacing: 12px;
+    color: var(--red-light);
+    text-shadow: 0 0 40px rgba(224,48,48,0.8);
+    font-family: 'Space Grotesk', sans-serif;
+}
+
+.death-by {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    font-family: 'Space Grotesk', sans-serif;
+}
+
+.death-timer {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 3px;
+}
+
+/* Performance monitor - solo este usa mono */
+#performance-monitor {
+    user-select: none;
+    font-weight: bold;
+    text-shadow: 0 0 2px black;
+    font-family: 'Share Tech Mono', monospace;
+}
+
+/* Crosshair */
 #crosshair {
     position: fixed;
     width: 22px;
@@ -281,299 +579,9 @@ html, body {
     transform: translateY(-50%);
 }
 
-/* Game screen y HUD */
-#game-screen {
-    background: #111118;
-}
-
-#game-canvas {
-    display: block;
-    width: 100%;
-    height: 100%;
-}
-
-#hud {
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 100;
-    display: flex;
-    align-items: flex-start;
-    padding: 14px;
-    gap: 14px;
-}
-
-#hud-left {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-width: 200px;
-}
-
-#hud-right {
-    min-width: 200px;
-    display: flex;
-    justify-content: flex-end;
-}
-
-#player-info {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-#player-shape-hud {
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: 2px;
-    color: var(--accent);
-}
-
-#player-team-hud {
-    font-family: 'Rajdhani', sans-serif;
-    font-size: 10px;
-    letter-spacing: 3px;
-}
-
-.red-team-text { color: var(--red-light); }
-.blue-team-text { color: var(--blue-light); }
-
-#health-container {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.health-label {
-    font-family: 'Rajdhani', sans-serif;
-    font-size: 10px;
-    color: var(--text-dim);
-    letter-spacing: 2px;
-    flex-shrink: 0;
-}
-
-.health-bar-bg {
-    position: relative;
-    width: 160px;
-    height: 16px;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 2px;
-    overflow: hidden;
-}
-
-#health-bar-fill {
-    height: 100%;
-    width: 100%;
-    background: linear-gradient(90deg, #2ecc71, #27ae60);
-    transition: width 0.15s, background 0.3s;
-}
-
-#health-bar-text {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: 'Rajdhani', sans-serif;
-    font-size: 10px;
-    color: white;
-    font-weight: bold;
-}
-
-#score-board {
-    display: flex;
-    align-items: center;
-    gap: 0;
-    background: rgba(0,0,0,0.5);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 3px;
-    overflow: hidden;
-}
-
-.score-team {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 8px 16px;
-    gap: 2px;
-}
-
-.red-score-block { background: rgba(224,48,48,0.15); }
-.blue-score-block { background: rgba(32,96,224,0.15); }
-
-.score-label {
-    font-family: 'Rajdhani', sans-serif;
-    font-size: 9px;
-    letter-spacing: 2px;
-    color: var(--text-dim);
-}
-
-.score-count {
-    font-size: 24px;
-    font-weight: 700;
-    line-height: 1;
-}
-
-.red-score-block .score-count { color: var(--red-light); }
-.blue-score-block .score-count { color: var(--blue-light); }
-
-.score-separator {
-    width: 1px;
-    height: 40px;
-    background: rgba(255,255,255,0.1);
-}
-
-#kill-feed {
-    position: fixed;
-    top: 100px;
-    right: 14px;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 6px;
-    pointer-events: none;
-    z-index: 100;
-}
-
-.kill-entry {
-    background: rgba(0,0,0,0.7);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 2px;
-    padding: 5px 10px;
-    font-size: 12px;
-    letter-spacing: 1px;
-    animation: feed-in 0.2s ease;
-    transition: opacity 0.5s;
-}
-
-@keyframes feed-in {
-    from { transform: translateX(20px); opacity: 0; }
-    to { transform: translateX(0); opacity: 1; }
-}
-
-.kill-entry .killer { font-weight: 700; }
-.kill-entry .victim { color: var(--text-dim); }
-.kill-entry .symbol { color: var(--accent); margin: 0 6px; }
-
-#death-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.75);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 200;
-    backdrop-filter: blur(4px);
-}
-
-#death-message {
-    text-align: center;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    animation: death-pop 0.3s ease;
-}
-
-@keyframes death-pop {
-    from { transform: scale(0.8); opacity: 0; }
-    to { transform: scale(1); opacity: 1; }
-}
-
-.death-title {
-    font-size: 64px;
-    font-weight: 700;
-    letter-spacing: 12px;
-    color: var(--red-light);
-    text-shadow: 0 0 40px rgba(224,48,48,0.8);
-}
-
-.death-by {
-    font-size: 16px;
-    color: var(--text-dim);
-    letter-spacing: 2px;
-}
-
-.death-timer {
-    font-family: 'Rajdhani', sans-serif;
-    font-size: 14px;
-    color: var(--accent);
-    letter-spacing: 3px;
-}
-/* Añadir al final del archivo style.css */
-#performance-monitor {
-    user-select: none;
-    font-weight: bold;
-    text-shadow: 0 0 2px black;
-}
-
-/* Mejorar visibilidad del crosshair */
 #crosshair::before,
 #crosshair::after {
     box-shadow: 0 0 2px rgba(0,0,0,0.5);
-}
-
-/* ---- NOMBRE EN LOBBY ---- */
-.join-container {
-    gap: 14px;
-}
-
-.name-input-wrap {
-    display: flex;
-    justify-content: center;
-}
-
-.name-input {
-    background: rgba(0,0,0,0.6);
-    border: 1px solid rgba(255,255,255,0.2);
-    border-radius: 50px;
-    padding: 10px 28px;
-    font-family: 'Rajdhani', sans-serif;
-    font-size: 18px;
-    font-weight: 700;
-    letter-spacing: 4px;
-    color: white;
-    text-align: center;
-    text-transform: uppercase;
-    outline: none;
-    width: 280px;
-    transition: border-color 0.2s;
-}
-
-.name-input::placeholder { color: rgba(255,255,255,0.25); letter-spacing: 3px; }
-.name-input:focus { border-color: var(--accent); box-shadow: 0 0 12px rgba(240,192,64,0.2); }
-
-/* ---- HUD CENTER ---- */
-#hud {
-    justify-content: space-between;
-    align-items: flex-start;
-}
-
-#hud-center {
-    flex: 1;
-    display: flex;
-    justify-content: center;
-}
-
-#hud-right {
-    min-width: 120px;
-    display: flex;
-    justify-content: flex-end;
-    align-items: flex-start;
-}
-
-.score-goal {
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 10px;
-    color: var(--text-dim);
-    letter-spacing: 1px;
-}
-
-#player-name-hud {
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 2px;
-    color: white;
 }
 
 /* ---- TOGGLE LEADERBOARD BTN ---- */
@@ -581,11 +589,11 @@ html, body {
     background: rgba(0,0,0,0.55);
     border: 1px solid rgba(255,255,255,0.15);
     border-radius: 4px;
-    padding: 6px 12px;
+    padding: 6px 14px;
     color: var(--text);
-    font-family: 'Rajdhani', sans-serif;
+    font-family: 'Space Grotesk', sans-serif;
     font-size: 13px;
-    font-weight: 700;
+    font-weight: 600;
     letter-spacing: 2px;
     cursor: pointer;
     pointer-events: auto;
@@ -598,28 +606,34 @@ html, body {
     color: var(--accent);
 }
 
-/* ---- LEADERBOARD PANEL ---- */
+/* ---- LEADERBOARD PANEL REDISEÑADO ---- */
 #leaderboard-panel {
     position: fixed;
     top: 70px;
     right: 14px;
-    width: 280px;
-    background: rgba(8,8,14,0.92);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 6px;
-    padding: 12px;
+    width: 300px;
+    background: rgba(6, 6, 12, 0.95);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 12px;
+    padding: 0;
     z-index: 150;
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(12px);
     pointer-events: none;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
 }
 
 .lb-title {
     font-size: 14px;
     font-weight: 700;
-    letter-spacing: 3px;
+    letter-spacing: 4px;
     color: var(--accent);
     text-align: center;
-    margin-bottom: 10px;
+    padding: 16px 0 12px 0;
+    margin: 0;
+    background: linear-gradient(180deg, rgba(240,192,64,0.1) 0%, transparent 100%);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    font-family: 'Space Grotesk', sans-serif;
 }
 
 .lb-table {
@@ -629,41 +643,81 @@ html, body {
 }
 
 .lb-table th {
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 9px;
-    letter-spacing: 2px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
     color: var(--text-dim);
-    padding: 3px 6px;
+    padding: 8px 12px;
     text-align: left;
-    border-bottom: 1px solid rgba(255,255,255,0.07);
+    background: rgba(0,0,0,0.3);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 
 .lb-table td {
-    padding: 5px 6px;
+    padding: 8px 12px;
     border-bottom: 1px solid rgba(255,255,255,0.04);
-    font-family: 'Rajdhani', sans-serif;
-    font-weight: 600;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 500;
 }
 
 .lb-table tr:last-child td { border-bottom: none; }
 
-.lb-table .lb-rank { color: var(--text-dim); font-size: 10px; width: 20px; }
-.lb-table .lb-name { color: white; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lb-table .lb-team-red { color: var(--red-light); font-size: 10px; letter-spacing: 1px; }
-.lb-table .lb-team-blue { color: var(--blue-light); font-size: 10px; letter-spacing: 1px; }
-.lb-table .lb-kills { color: var(--accent); font-weight: 700; text-align: right; }
-.lb-table tr.lb-me td { background: rgba(240,192,64,0.06); }
+.lb-table .lb-rank { 
+    color: var(--text-dim); 
+    font-size: 11px; 
+    font-weight: 600;
+    width: 30px;
+}
+
+.lb-table .lb-name { 
+    color: #ffffff; 
+    font-weight: 600;
+    max-width: 110px; 
+    overflow: hidden; 
+    text-overflow: ellipsis; 
+    white-space: nowrap; 
+}
+
+.lb-table .lb-team-red { 
+    color: var(--red-light); 
+    font-size: 10px; 
+    letter-spacing: 1px;
+    font-weight: 600;
+}
+
+.lb-table .lb-team-blue { 
+    color: var(--blue-light); 
+    font-size: 10px; 
+    letter-spacing: 1px;
+    font-weight: 600;
+}
+
+.lb-table .lb-kills { 
+    color: var(--accent); 
+    font-weight: 700; 
+    text-align: right;
+    font-size: 13px;
+}
+
+.lb-table tr.lb-me td { 
+    background: rgba(240,192,64,0.1);
+}
+
+.lb-table tr.lb-me .lb-name {
+    color: var(--accent);
+}
 
 /* ---- VICTORIA ---- */
 #victory-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.88);
+    background: rgba(0,0,0,0.92);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 300;
-    backdrop-filter: blur(6px);
+    backdrop-filter: blur(8px);
 }
 
 #victory-message {
@@ -671,15 +725,16 @@ html, body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 14px;
+    gap: 20px;
     animation: death-pop 0.4s ease;
 }
 
 .victory-title {
     font-size: 72px;
-    font-weight: 700;
-    letter-spacing: 10px;
+    font-weight: 800;
+    letter-spacing: 12px;
     text-shadow: 0 0 50px currentColor;
+    font-family: 'Space Grotesk', sans-serif;
 }
 
 .victory-title.red  { color: var(--red-light); }
@@ -687,16 +742,18 @@ html, body {
 
 .victory-sub {
     font-size: 18px;
+    font-weight: 500;
     letter-spacing: 4px;
     color: var(--text-dim);
+    font-family: 'Space Grotesk', sans-serif;
 }
 
 .victory-board {
-    background: rgba(0,0,0,0.5);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 6px;
-    padding: 14px 24px;
-    min-width: 300px;
+    background: rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 12px;
+    padding: 16px 24px;
+    min-width: 320px;
 }
 
 .victory-board table {
@@ -706,23 +763,26 @@ html, body {
 }
 
 .victory-board th {
-    font-size: 9px;
+    font-size: 10px;
+    font-weight: 600;
     letter-spacing: 2px;
     color: var(--text-dim);
-    padding: 3px 8px;
+    padding: 8px 12px;
     text-align: left;
     border-bottom: 1px solid rgba(255,255,255,0.1);
+    font-family: 'Space Grotesk', sans-serif;
 }
 
 .victory-board td {
-    padding: 6px 8px;
-    font-family: 'Rajdhani', sans-serif;
+    padding: 8px 12px;
+    font-family: 'Space Grotesk', sans-serif;
     font-weight: 600;
 }
 
 .victory-timer {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'Space Grotesk', sans-serif;
     font-size: 14px;
+    font-weight: 600;
     color: var(--accent);
     letter-spacing: 3px;
 }
