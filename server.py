@@ -29,7 +29,7 @@ PROJECTILE_HEIGHT = 5
 
 TICK_RATE = 20
 GAME_TICK = 1.0 / TICK_RATE
-KILLS_TO_WIN = 50
+KILLS_TO_WIN = 20
 
 players = {}
 projectiles = {}
