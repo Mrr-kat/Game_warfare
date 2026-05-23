@@ -343,6 +343,18 @@ def on_input(data):
     keys = data.get("keys", {})
     dt = min(data.get("dt", 0.016), 0.05)
     plr["angle"] = data.get("angle", 0)
+    
+    # RECIBIR POSICIÓN DEL CLIENTE (para mejor sincronización)
+    client_x = data.get("x")
+    client_y = data.get("y")
+    
+    if client_x and client_y:
+        # Si la diferencia es pequeña, confiar en el cliente
+        dx = abs(plr["x"] - client_x)
+        dy = abs(plr["y"] - client_y)
+        if dx < 100 and dy < 100:
+            plr["x"] = client_x
+            plr["y"] = client_y
 
     dx, dy = 0, 0
     if keys.get("w"): dy -= 1
