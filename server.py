@@ -8,15 +8,16 @@ import os
 app = Flask(__name__, static_folder="static", template_folder=".")
 app.config["SECRET_KEY"] = "battleground2025"
 
-# Configuración simple sin especificar async_mode
+# Configuración para producción con Gunicorn
 socketio = SocketIO(app, 
                     cors_allowed_origins="*",
+                    async_mode='eventlet',
                     ping_timeout=60, 
                     ping_interval=25)
 
-# MAPA REDUCIDO
-MAP_WIDTH = 3000  # Reducido aún más para Railway free
-MAP_HEIGHT = 3000
+# MAPA OPTIMIZADO
+MAP_WIDTH = 2500
+MAP_HEIGHT = 2500
 
 RED_SPAWN = {"x": 150, "y": 150}
 BLUE_SPAWN = {"x": 2350, "y": 2350}
@@ -33,14 +34,14 @@ PLAYER_SPEED = 220
 PLAYER_RADIUS = 20
 PROJECTILE_WIDTH = 10
 
-TICK_RATE = 25  # Reducido a 25 FPS para Railway
+TICK_RATE = 30
 GAME_TICK = 1.0 / TICK_RATE
 
 players = {}
 projectiles = {}
 last_update = time.time()
 
-# Terreno reducido al mínimo
+# Terreno optimizado
 TERRAIN_SEED = 42
 
 def seeded_random_gen(seed):
@@ -54,8 +55,8 @@ def generate_solid_obstacles():
     rng = seeded_random_gen(TERRAIN_SEED)
     obstacles = []
 
-    # Solo 30 rocas (reducido)
-    for i in range(30):
+    # 25 rocas
+    for i in range(25):
         x = rng() * MAP_WIDTH
         y = rng() * MAP_HEIGHT
         w = 35 + rng() * 50   
@@ -63,8 +64,8 @@ def generate_solid_obstacles():
         r = (w + h) / 4       
         obstacles.append({"type": "rock", "x": x, "y": y, "r": r})
 
-    # Solo 20 cajas (reducido)
-    for i in range(20):
+    # 15 cajas
+    for i in range(15):
         x = rng() * MAP_WIDTH
         y = rng() * MAP_HEIGHT
         size = 20 + rng() * 12
@@ -237,7 +238,7 @@ def game_loop():
                     plr["dead_timer"] = 0
                     socketio.emit("player_respawned", {"id": plr_id})
 
-        # Broadcast estado
+        # Broadcast estado optimizado
         current_state = {
             "players": {
                 pid: {
@@ -271,7 +272,7 @@ def game_loop():
         elapsed = time.time() - loop_start
         sleep_time = tick_interval - elapsed
         if sleep_time > 0:
-            time.sleep(min(sleep_time, 0.033))
+            time.sleep(sleep_time)
 
 @app.route("/")
 def index():
@@ -409,10 +410,5 @@ if __name__ == "__main__":
     print(f"Obstacles: {len(solid_obstacles)}")
     print("=" * 50)
     
-    # Iniciar game loop en background
-    import threading
-    game_thread = threading.Thread(target=game_loop, daemon=True)
-    game_thread.start()
-    
     port = int(os.environ.get("PORT", 5000))
-    socketio.run(app, host="0.0.0.0", port=port, debug=False)
+    socketio.run(app, host="0.0.0.0", port=port, debug=False, allow_unsafe_werkzeug=True)
