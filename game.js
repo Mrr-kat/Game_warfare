@@ -19,7 +19,7 @@ let myId = null;
 let myTeam = null;
 let myShape = null;
 let myName = "";
-let killsToWin = 50;
+let killsToWin = 20;
 
 let serverState = { players: {}, projectiles: {}, team_kills: { red: 0, blue: 0 } };
 let stateBuffer = [];
