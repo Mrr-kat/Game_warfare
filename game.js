@@ -1,19 +1,18 @@
 "use strict";
 
 const socket = io({
-    transports: ['websocket'], // Solo websocket para mejor performance
+    transports: ['websocket'],
     reconnection: true,
     reconnectionAttempts: 5,
     reconnectionDelay: 1000
 });
 
-// MAPA REDUCIDO (debe coincidir con server)
-const MAP_WIDTH = 3000;
-const MAP_HEIGHT = 3000;
-const TILE_SIZE = 80; // Grid más grande = menos celdas a renderizar
+// MAPA REDUCIDO a 2500
+const MAP_WIDTH = 2500;
+const MAP_HEIGHT = 2500;
+const TILE_SIZE = 70;
 
 const FOV_MARGIN = 100;
-const MAX_PLAYERS_RENDER = 20; // Límite de renderizado
 
 let myId = null;
 let myTeam = null;
@@ -27,12 +26,17 @@ let mouseY = 0;
 
 let camera = { x: 0, y: 0 };
 let lastTime = performance.now();
-let lastRenderTime = 0;
-let frameCount = 0;
-let fps = 60;
 
 let deathTimer = 0;
 let isDead = false;
+
+// Variables para FPS y Ping
+let fps = 60;
+let ping = 0;
+let lastPingTime = 0;
+let frameTimes = [];
+let lastFrameTime = performance.now();
+let lastPingRequest = 0;
 
 const canvas = document.getElementById("game-canvas");
 const ctx = canvas.getContext("2d", { alpha: false });
@@ -45,7 +49,27 @@ const healthFill = document.getElementById("health-bar-fill");
 const healthText = document.getElementById("health-bar-text");
 const crosshair = document.getElementById("crosshair");
 
-// TERRENO DECORATIVO REDUCIDO
+// Crear monitor de rendimiento
+const performanceDiv = document.createElement("div");
+performanceDiv.id = "performance-monitor";
+performanceDiv.style.cssText = `
+    position: fixed;
+    bottom: 10px;
+    left: 10px;
+    background: rgba(0,0,0,0.7);
+    color: #0f0;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    padding: 5px 10px;
+    border-radius: 4px;
+    z-index: 1000;
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(255,255,255,0.2);
+`;
+document.body.appendChild(performanceDiv);
+
+// TERRENO DECORATIVO (70 objetos totales)
 const TERRAIN_SEED = 42;
 let terrainObjects = [];
 
@@ -61,12 +85,12 @@ function generateTerrain() {
     const rng = seededRandom(TERRAIN_SEED);
     terrainObjects = [];
 
-    // REDUCIDO: 40 rocas (antes 70)
-    for (let i = 0; i < 40; i++) {
+    // 35 rocas
+    for (let i = 0; i < 35; i++) {
         const x = rng() * MAP_WIDTH;
         const y = rng() * MAP_HEIGHT;
-        const w = 35 + rng() * 60;
-        const h = 25 + rng() * 40;
+        const w = 35 + rng() * 55;
+        const h = 25 + rng() * 35;
         terrainObjects.push({
             type: "rock",
             x, y,
@@ -75,8 +99,8 @@ function generateTerrain() {
         });
     }
 
-    // REDUCIDO: 60 arbustos (antes 100)
-    for (let i = 0; i < 60; i++) {
+    // 35 arbustos (solo decorativos)
+    for (let i = 0; i < 35; i++) {
         const x = rng() * MAP_WIDTH;
         const y = rng() * MAP_HEIGHT;
         const r = 14 + rng() * 20;
@@ -87,19 +111,9 @@ function generateTerrain() {
             color: "#2d6e2d"
         });
     }
-
-    // REDUCIDO: 30 cajas (antes 50)
-    for (let i = 0; i < 30; i++) {
-        const x = rng() * MAP_WIDTH;
-        const y = rng() * MAP_HEIGHT;
-        const size = 20 + rng() * 12;
-        terrainObjects.push({
-            type: "crate",
-            x, y,
-            size,
-            color: "#7a5230"
-        });
-    }
+    
+    // NOTA: Las cajas NO se generan como decorativas en el cliente
+    // porque ya están en el servidor como obstáculos sólidos
 }
 
 function resizeCanvas() {
@@ -110,6 +124,34 @@ function resizeCanvas() {
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 generateTerrain();
+
+// Medir ping periódicamente
+setInterval(() => {
+    if (myId) {
+        lastPingRequest = Date.now();
+        socket.emit("ping_request");
+    }
+}, 2000);
+
+socket.on("pong_response", () => {
+    ping = Date.now() - lastPingRequest;
+});
+
+// Calcular FPS
+function updatePerformance() {
+    const now = performance.now();
+    const delta = now - lastFrameTime;
+    lastFrameTime = now;
+    
+    frameTimes.push(delta);
+    if (frameTimes.length > 60) frameTimes.shift();
+    
+    const avgDelta = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
+    fps = Math.round(1000 / avgDelta);
+    
+    const pingColor = ping < 100 ? "#0f0" : (ping < 200 ? "#ff0" : "#f00");
+    performanceDiv.innerHTML = `FPS: ${fps} | PING: <span style="color:${pingColor}">${ping}ms</span>`;
+}
 
 // LOBBY
 let selectedTeam = "red";
@@ -187,13 +229,10 @@ socket.on("joined", data => {
 
 // Rate limiting para updates de UI
 let lastScoreUpdate = 0;
-let pendingRedCount = 0;
-let pendingBlueCount = 0;
 
 socket.on("game_state", data => {
     gameState = data;
     
-    // Actualizar scores solo cada 200ms para reducir reflows
     const now = Date.now();
     if (now - lastScoreUpdate > 200) {
         let redCount = 0;
@@ -210,10 +249,8 @@ socket.on("game_state", data => {
     if (myId && data.players[myId]) {
         const me = data.players[myId];
         const hp = Math.max(0, me.hp);
-        requestAnimationFrame(() => {
-            healthFill.style.width = hp + "%";
-            healthText.textContent = hp;
-        });
+        healthFill.style.width = hp + "%";
+        healthText.textContent = hp;
     }
 });
 
@@ -252,9 +289,9 @@ function addKillFeedEntry(killerTeam, victimTeam) {
     while (killFeed.children.length > 5) killFeed.removeChild(killFeed.firstChild);
 }
 
-// INPUT con throttling
+// INPUT
 let lastInputTime = 0;
-const INPUT_INTERVAL = 1000 / 40; // 40 inputs por segundo (antes 60)
+const INPUT_INTERVAL = 1000 / 40;
 
 window.addEventListener("keydown", e => {
     const k = e.key.toLowerCase();
@@ -296,7 +333,6 @@ window.addEventListener("mousedown", e => {
     e.preventDefault();
 });
 
-// Input con throttling
 setInterval(() => {
     if (!myId || isDead) return;
     const now = Date.now();
@@ -310,7 +346,6 @@ setInterval(() => {
     }
 }, INPUT_INTERVAL);
 
-// CAMPOS DE VISIÓN OPTIMIZADOS
 function inFOV(wx, wy, margin) {
     const m = margin || FOV_MARGIN;
     const sx = wx - camera.x;
@@ -318,7 +353,6 @@ function inFOV(wx, wy, margin) {
     return sx > -m && sx < canvas.width + m && sy > -m && sy < canvas.height + m;
 }
 
-// RENDER OPTIMIZADO
 function drawMap() {
     const vx = camera.x;
     const vy = camera.y;
@@ -328,7 +362,6 @@ function drawMap() {
     ctx.fillStyle = "#13131b";
     ctx.fillRect(0, 0, vw, vh);
 
-    // Grid más grande (TILE_SIZE 80 en lugar de 100)
     const startTX = Math.max(0, Math.floor(vx / TILE_SIZE));
     const startTY = Math.max(0, Math.floor(vy / TILE_SIZE));
     const endTX = Math.min(Math.floor(MAP_WIDTH / TILE_SIZE), Math.ceil((vx + vw) / TILE_SIZE));
@@ -358,7 +391,7 @@ function drawSpawnZone(cx, cy, team) {
     const color = team === "red" ? "224,48,48" : "32,96,224";
 
     ctx.beginPath();
-    ctx.arc(sx, sy, 180, 0, Math.PI * 2);
+    ctx.arc(sx, sy, 160, 0, Math.PI * 2);
     ctx.fillStyle = `rgba(${color},0.04)`;
     ctx.fill();
     ctx.strokeStyle = `rgba(${color},0.12)`;
@@ -389,18 +422,10 @@ function drawTerrain() {
             ctx.strokeStyle = "rgba(160,80,255,0.85)";
             ctx.lineWidth = 1.5;
             ctx.stroke();
-
         } else if (obj.type === "bush") {
             ctx.beginPath();
             ctx.arc(sx, sy, obj.r, 0, Math.PI * 2);
             ctx.fill();
-
-        } else if (obj.type === "crate") {
-            const s = obj.size;
-            ctx.fillRect(sx - s / 2, sy - s / 2, s, s);
-            ctx.strokeStyle = "rgba(160,80,255,0.85)";
-            ctx.lineWidth = 1.5;
-            ctx.strokeRect(sx - s / 2, sy - s / 2, s, s);
         }
     }
 }
@@ -509,33 +534,31 @@ function updateDeathTimer(dt) {
     }
 }
 
-// GAME LOOP OPTIMIZADO con frame rate limit
-let lastFrameTime = 0;
+let lastFrameRender = 0;
 const TARGET_FPS = 60;
 const FRAME_INTERVAL = 1000 / TARGET_FPS;
 
 function gameLoop(now) {
     requestAnimationFrame(gameLoop);
     
-    const delta = now - lastFrameTime;
+    const delta = now - lastFrameRender;
     if (delta < FRAME_INTERVAL) return;
     
-    lastFrameTime = now - (delta % FRAME_INTERVAL);
+    lastFrameRender = now - (delta % FRAME_INTERVAL);
     const dt = Math.min((now - lastTime) / 1000, 0.05);
     lastTime = now;
 
+    updatePerformance();
     updateCamera();
     updateDeathTimer(dt);
 
     drawMap();
     drawTerrain();
 
-    // Renderizar proyectiles
     for (const pid in gameState.projectiles) {
         drawProjectile(gameState.projectiles[pid]);
     }
 
-    // Renderizar jugadores
     const players = Object.values(gameState.players);
     for (const plr of players) {
         if (plr.id !== myId) drawPlayer(plr);
@@ -545,8 +568,8 @@ function gameLoop(now) {
     }
 }
 
-// Iniciar después de cargar
 window.addEventListener('load', () => {
     lastTime = performance.now();
+    lastFrameRender = performance.now();
     lastFrameTime = performance.now();
 });
