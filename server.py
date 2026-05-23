@@ -30,7 +30,7 @@ PLAYER_RADIUS = 20
 PROJECTILE_WIDTH = 10
 PROJECTILE_HEIGHT = 5
 
-TICK_RATE = 30
+TICK_RATE = 20
 GAME_TICK = 1.0 / TICK_RATE
 
 players = {}
@@ -401,6 +401,10 @@ def on_shoot(data):
             "damage": damage,
             "lifetime": PROJECTILE_LIFETIME
         }
+
+@socketio.on("ping_request")
+def on_ping():
+    emit("pong_response")
 
 @socketio.on("disconnect")
 def on_disconnect():
