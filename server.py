@@ -15,7 +15,7 @@ MAP_HEIGHT = 2500
 RED_SPAWN = {"x": 150, "y": 150}
 BLUE_SPAWN = {"x": 2350, "y": 2350}
 
-SHAPE_DAMAGE = {"circle": 18, "square": 12, "triangle": 14}
+SHAPE_DAMAGE = {"circle": 20, "square": 15, "triangle": 12}
 SHAPE_FIRE_RATE = {"circle": 0.8, "square": 0.9, "triangle": 0.35}
 SHAPE_PROJECTILE_COUNT = {"circle": 1, "square": 3, "triangle": 1}
 SHAPE_SPREAD = {"circle": 0.0, "square": 0.25, "triangle": 0.0}
