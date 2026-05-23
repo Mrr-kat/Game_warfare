@@ -322,6 +322,8 @@ function addKillFeedEntry(killerName, killerTeam, victimName, victimTeam) {
 
 // INPUT
 window.addEventListener("keydown", e => {
+    // No interceptar teclas si el foco está en el input de nombre
+    if (document.activeElement === nameInput) return;
     const k = e.key.toLowerCase();
     if (k === "w") keys.w = true;
     else if (k === "a") keys.a = true;
@@ -350,7 +352,8 @@ window.addEventListener("mousedown", e => {
     if (e.button === 0 && myId && !isDead && !isGameOver) {
         socket.emit("shoot", { angle: mouseAngle });
     }
-    e.preventDefault();
+    // Solo prevenir el default en la pantalla de juego para evitar selección de texto
+    if (myId) e.preventDefault();
 });
 
 // Input al servidor a 20Hz
