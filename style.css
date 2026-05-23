@@ -512,3 +512,217 @@ html, body {
 #crosshair::after {
     box-shadow: 0 0 2px rgba(0,0,0,0.5);
 }
+
+/* ---- NOMBRE EN LOBBY ---- */
+.join-container {
+    gap: 14px;
+}
+
+.name-input-wrap {
+    display: flex;
+    justify-content: center;
+}
+
+.name-input {
+    background: rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 50px;
+    padding: 10px 28px;
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    color: white;
+    text-align: center;
+    text-transform: uppercase;
+    outline: none;
+    width: 280px;
+    transition: border-color 0.2s;
+}
+
+.name-input::placeholder { color: rgba(255,255,255,0.25); letter-spacing: 3px; }
+.name-input:focus { border-color: var(--accent); box-shadow: 0 0 12px rgba(240,192,64,0.2); }
+
+/* ---- HUD CENTER ---- */
+#hud {
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+#hud-center {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+}
+
+#hud-right {
+    min-width: 120px;
+    display: flex;
+    justify-content: flex-end;
+    align-items: flex-start;
+}
+
+.score-goal {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+}
+
+#player-name-hud {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: white;
+}
+
+/* ---- TOGGLE LEADERBOARD BTN ---- */
+.toggle-board-btn {
+    background: rgba(0,0,0,0.55);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 4px;
+    padding: 6px 12px;
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    cursor: pointer;
+    pointer-events: auto;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.toggle-board-btn:hover {
+    border-color: var(--accent);
+    background: rgba(240,192,64,0.08);
+    color: var(--accent);
+}
+
+/* ---- LEADERBOARD PANEL ---- */
+#leaderboard-panel {
+    position: fixed;
+    top: 70px;
+    right: 14px;
+    width: 280px;
+    background: rgba(8,8,14,0.92);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    padding: 12px;
+    z-index: 150;
+    backdrop-filter: blur(8px);
+    pointer-events: none;
+}
+
+.lb-title {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: var(--accent);
+    text-align: center;
+    margin-bottom: 10px;
+}
+
+.lb-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.lb-table th {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    padding: 3px 6px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+
+.lb-table td {
+    padding: 5px 6px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 600;
+}
+
+.lb-table tr:last-child td { border-bottom: none; }
+
+.lb-table .lb-rank { color: var(--text-dim); font-size: 10px; width: 20px; }
+.lb-table .lb-name { color: white; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-table .lb-team-red { color: var(--red-light); font-size: 10px; letter-spacing: 1px; }
+.lb-table .lb-team-blue { color: var(--blue-light); font-size: 10px; letter-spacing: 1px; }
+.lb-table .lb-kills { color: var(--accent); font-weight: 700; text-align: right; }
+.lb-table tr.lb-me td { background: rgba(240,192,64,0.06); }
+
+/* ---- VICTORIA ---- */
+#victory-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.88);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 300;
+    backdrop-filter: blur(6px);
+}
+
+#victory-message {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    animation: death-pop 0.4s ease;
+}
+
+.victory-title {
+    font-size: 72px;
+    font-weight: 700;
+    letter-spacing: 10px;
+    text-shadow: 0 0 50px currentColor;
+}
+
+.victory-title.red  { color: var(--red-light); }
+.victory-title.blue { color: var(--blue-light); }
+
+.victory-sub {
+    font-size: 18px;
+    letter-spacing: 4px;
+    color: var(--text-dim);
+}
+
+.victory-board {
+    background: rgba(0,0,0,0.5);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    padding: 14px 24px;
+    min-width: 300px;
+}
+
+.victory-board table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.victory-board th {
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    padding: 3px 8px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.victory-board td {
+    padding: 6px 8px;
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 600;
+}
+
+.victory-timer {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 14px;
+    color: var(--accent);
+    letter-spacing: 3px;
+}
