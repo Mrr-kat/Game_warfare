@@ -7,11 +7,10 @@ const socket = io({
     reconnectionDelay: 1000
 });
 
-// MAPA REDUCIDO a 2500
+// MAPA
 const MAP_WIDTH = 2500;
 const MAP_HEIGHT = 2500;
 const TILE_SIZE = 70;
-
 const FOV_MARGIN = 100;
 
 let myId = null;
@@ -30,7 +29,19 @@ let lastTime = performance.now();
 let deathTimer = 0;
 let isDead = false;
 
-// Variables para FPS y Ping
+// Variables para interpolación
+let lastServerState = null;
+let nextServerState = null;
+let lastStateTime = 0;
+let nextStateTime = 0;
+let interpolationFactor = 0;
+
+// Variables para predicción de movimiento local
+let localPlayer = null;
+let lastSentInput = { keys: {}, angle: 0, time: 0 };
+let pendingInputs = [];
+
+// FPS y Ping
 let fps = 60;
 let ping = 0;
 let lastPingTime = 0;
@@ -49,7 +60,7 @@ const healthFill = document.getElementById("health-bar-fill");
 const healthText = document.getElementById("health-bar-text");
 const crosshair = document.getElementById("crosshair");
 
-// Crear monitor de rendimiento
+// Monitor de rendimiento
 const performanceDiv = document.createElement("div");
 performanceDiv.id = "performance-monitor";
 performanceDiv.style.cssText = `
@@ -69,7 +80,7 @@ performanceDiv.style.cssText = `
 `;
 document.body.appendChild(performanceDiv);
 
-// TERRENO DECORATIVO (70 objetos totales)
+// TERRENO
 const TERRAIN_SEED = 42;
 let terrainObjects = [];
 
@@ -85,7 +96,6 @@ function generateTerrain() {
     const rng = seededRandom(TERRAIN_SEED);
     terrainObjects = [];
 
-    // 35 rocas
     for (let i = 0; i < 35; i++) {
         const x = rng() * MAP_WIDTH;
         const y = rng() * MAP_HEIGHT;
@@ -99,7 +109,6 @@ function generateTerrain() {
         });
     }
 
-    // 35 arbustos (solo decorativos)
     for (let i = 0; i < 35; i++) {
         const x = rng() * MAP_WIDTH;
         const y = rng() * MAP_HEIGHT;
@@ -111,9 +120,6 @@ function generateTerrain() {
             color: "#2d6e2d"
         });
     }
-    
-    // NOTA: Las cajas NO se generan como decorativas en el cliente
-    // porque ya están en el servidor como obstáculos sólidos
 }
 
 function resizeCanvas() {
@@ -125,7 +131,7 @@ window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 generateTerrain();
 
-// Medir ping periódicamente
+// Ping periódico
 setInterval(() => {
     if (myId) {
         lastPingRequest = Date.now();
@@ -150,7 +156,8 @@ function updatePerformance() {
     fps = Math.round(1000 / avgDelta);
     
     const pingColor = ping < 100 ? "#0f0" : (ping < 200 ? "#ff0" : "#f00");
-    performanceDiv.innerHTML = `FPS: ${fps} | PING: <span style="color:${pingColor}">${ping}ms</span>`;
+    const interpInfo = interpolationFactor ? `| INTERP: ${Math.round(interpolationFactor * 100)}%` : '';
+    performanceDiv.innerHTML = `FPS: ${fps} | PING: <span style="color:${pingColor}">${ping}ms</span> ${interpInfo}`;
 }
 
 // LOBBY
@@ -211,9 +218,19 @@ socket.on("joined", data => {
     myTeam = data.team;
     myShape = data.shape;
 
+    // Inicializar jugador local
+    localPlayer = {
+        id: myId,
+        x: data.x,
+        y: data.y,
+        hp: 100,
+        team: myTeam,
+        shape: myShape,
+        angle: 0
+    };
+
     lobbySel.classList.remove("active");
     gameSel.classList.add("active");
-
     setGameCursor();
 
     const shapeNames = { circle: "CIRCULO", square: "CUADRADO", triangle: "TRIANGULO" };
@@ -227,13 +244,13 @@ socket.on("joined", data => {
     requestAnimationFrame(gameLoop);
 });
 
-// Rate limiting para updates de UI
+// Rate limiting para UI
 let lastScoreUpdate = 0;
 
 socket.on("game_state", data => {
-    gameState = data;
-    
     const now = Date.now();
+    
+    // Actualizar scores
     if (now - lastScoreUpdate > 200) {
         let redCount = 0;
         let blueCount = 0;
@@ -246,13 +263,74 @@ socket.on("game_state", data => {
         lastScoreUpdate = now;
     }
 
+    // ACTUALIZACIÓN DE JUGADORES CON INTERPOLACIÓN
+    const currentTime = performance.now() / 1000;
+    
+    if (lastServerState && nextServerState) {
+        // Mover el estado anterior al next para interpolación
+        lastServerState = nextServerState;
+        lastStateTime = nextStateTime;
+    } else if (!lastServerState) {
+        lastServerState = data;
+        lastStateTime = currentTime;
+        return;
+    }
+    
+    nextServerState = data;
+    nextStateTime = currentTime;
+    
+    // Actualizar proyectiles directamente (son muchos cambios)
+    gameState.projectiles = data.projectiles;
+    
+    // Actualizar vida del jugador local
     if (myId && data.players[myId]) {
-        const me = data.players[myId];
-        const hp = Math.max(0, me.hp);
+        const serverMe = data.players[myId];
+        if (localPlayer) {
+            // Corrección del servidor si es necesario
+            const dx = Math.abs(localPlayer.x - serverMe.x);
+            const dy = Math.abs(localPlayer.y - serverMe.y);
+            if (dx > 50 || dy > 50) {
+                // Si hay mucha diferencia, corregir posición
+                localPlayer.x = serverMe.x;
+                localPlayer.y = serverMe.y;
+            }
+            localPlayer.hp = serverMe.hp;
+            localPlayer.angle = serverMe.angle;
+            localPlayer.dead = serverMe.dead;
+        }
+        
+        // Actualizar UI de vida
+        const hp = Math.max(0, serverMe.hp);
         healthFill.style.width = hp + "%";
         healthText.textContent = hp;
     }
 });
+
+// Función para obtener jugador interpolado
+function getInterpolatedPlayer(playerId) {
+    if (!lastServerState || !nextServerState) return null;
+    
+    // Calcular factor de interpolación (0 a 1)
+    const currentTime = performance.now() / 1000;
+    const totalTime = nextStateTime - lastStateTime;
+    let t = totalTime > 0 ? (currentTime - lastStateTime) / totalTime : 1;
+    t = Math.min(1, Math.max(0, t));
+    interpolationFactor = t;
+    
+    const lastPlayer = lastServerState.players[playerId];
+    const nextPlayer = nextServerState.players[playerId];
+    
+    if (!lastPlayer || !nextPlayer) return nextPlayer || lastPlayer;
+    if (playerId === myId && localPlayer) return localPlayer;
+    
+    // Interpolar posición
+    return {
+        ...nextPlayer,
+        x: lastPlayer.x + (nextPlayer.x - lastPlayer.x) * t,
+        y: lastPlayer.y + (nextPlayer.y - lastPlayer.y) * t,
+        angle: lastPlayer.angle + (nextPlayer.angle - lastPlayer.angle) * t
+    };
+}
 
 socket.on("player_died", data => {
     if (data.id === myId) {
@@ -270,6 +348,7 @@ socket.on("player_respawned", data => {
     if (data.id === myId) {
         isDead = false;
         deathOverlay.classList.add("hidden");
+        if (localPlayer) localPlayer.dead = false;
     }
 });
 
@@ -289,9 +368,38 @@ function addKillFeedEntry(killerTeam, victimTeam) {
     while (killFeed.children.length > 5) killFeed.removeChild(killFeed.firstChild);
 }
 
-// INPUT
+// INPUT con predicción
 let lastInputTime = 0;
-const INPUT_INTERVAL = 1000 / 40;
+const INPUT_INTERVAL = 1000 / 30; // 30 inputs por segundo
+
+// Movimiento local del jugador
+let lastMoveTime = 0;
+const PLAYER_SPEED = 280;
+
+function updateLocalMovement(dt) {
+    if (!localPlayer || isDead) return;
+    
+    let dx = 0, dy = 0;
+    if (keys.w) dy -= 1;
+    if (keys.s) dy += 1;
+    if (keys.a) dx -= 1;
+    if (keys.d) dx += 1;
+    
+    if (dx !== 0 || dy !== 0) {
+        const length = Math.hypot(dx, dy);
+        dx /= length;
+        dy /= length;
+    }
+    
+    // Movimiento local (predicción)
+    localPlayer.x += dx * PLAYER_SPEED * dt;
+    localPlayer.y += dy * PLAYER_SPEED * dt;
+    
+    // Limitar al mapa
+    localPlayer.x = Math.max(20, Math.min(MAP_WIDTH - 20, localPlayer.x));
+    localPlayer.y = Math.max(20, Math.min(MAP_HEIGHT - 20, localPlayer.y));
+    localPlayer.angle = mouseAngle;
+}
 
 window.addEventListener("keydown", e => {
     const k = e.key.toLowerCase();
@@ -333,19 +441,23 @@ window.addEventListener("mousedown", e => {
     e.preventDefault();
 });
 
+// Envío de input al servidor
 setInterval(() => {
-    if (!myId || isDead) return;
+    if (!myId || isDead || !localPlayer) return;
     const now = Date.now();
     if (now - lastInputTime >= INPUT_INTERVAL) {
         socket.emit("player_input", {
             keys: { ...keys },
             angle: mouseAngle,
-            dt: 0.025
+            x: localPlayer.x,
+            y: localPlayer.y,
+            dt: 0.033
         });
         lastInputTime = now;
     }
 }, INPUT_INTERVAL);
 
+// CAMPOS DE VISIÓN
 function inFOV(wx, wy, margin) {
     const m = margin || FOV_MARGIN;
     const sx = wx - camera.x;
@@ -353,6 +465,7 @@ function inFOV(wx, wy, margin) {
     return sx > -m && sx < canvas.width + m && sy > -m && sy < canvas.height + m;
 }
 
+// RENDER
 function drawMap() {
     const vx = camera.x;
     const vy = camera.y;
@@ -430,28 +543,28 @@ function drawTerrain() {
     }
 }
 
-function drawPlayer(plr) {
+function drawPlayer(plr, isLocal = false) {
+    if (!plr) return;
     if (!inFOV(plr.x, plr.y, 50)) return;
 
     const sx = plr.x - camera.x;
     const sy = plr.y - camera.y;
     const r = 18;
-    const isMe = plr.id === myId;
 
     const teamColor = plr.team === "red" ? "#cc2828" : "#1850cc";
     const teamBorder = plr.team === "red" ? "#e84444" : "#3d78f5";
 
     ctx.save();
     ctx.translate(sx, sy);
-    ctx.rotate(plr.angle);
+    ctx.rotate(plr.angle || 0);
 
     if (plr.dead) {
         ctx.globalAlpha = 0.35;
     }
 
     ctx.fillStyle = teamColor;
-    ctx.strokeStyle = isMe ? "rgba(255,255,255,0.9)" : teamBorder;
-    ctx.lineWidth = isMe ? 2.5 : 1.5;
+    ctx.strokeStyle = isLocal ? "rgba(255,255,255,0.9)" : teamBorder;
+    ctx.lineWidth = isLocal ? 2.5 : 1.5;
 
     if (plr.shape === "circle") {
         ctx.beginPath();
@@ -480,7 +593,7 @@ function drawPlayer(plr) {
         const barH = 4;
         const bx = sx - barW / 2;
         const by = sy - r - 8;
-        const hpRatio = plr.hp / 100;
+        const hpRatio = (plr.hp || 100) / 100;
 
         ctx.fillStyle = "rgba(0,0,0,0.55)";
         ctx.fillRect(bx - 1, by - 1, barW + 2, barH + 2);
@@ -488,7 +601,7 @@ function drawPlayer(plr) {
         ctx.fillStyle = hpRatio > 0.6 ? "#2ecc71" : hpRatio > 0.3 ? "#f39c12" : "#e74c3c";
         ctx.fillRect(bx, by, barW * hpRatio, barH);
 
-        if (isMe) {
+        if (isLocal) {
             ctx.fillStyle = "rgba(255,255,255,0.6)";
             ctx.font = "bold 9px 'Share Tech Mono',monospace";
             ctx.textAlign = "center";
@@ -516,10 +629,9 @@ function drawProjectile(proj) {
 }
 
 function updateCamera() {
-    if (!myId || !gameState.players[myId]) return;
-    const me = gameState.players[myId];
-    const tx = me.x - canvas.width / 2;
-    const ty = me.y - canvas.height / 2;
+    if (!localPlayer) return;
+    const tx = localPlayer.x - canvas.width / 2;
+    const ty = localPlayer.y - canvas.height / 2;
     camera.x = Math.max(0, Math.min(MAP_WIDTH - canvas.width, tx));
     camera.y = Math.max(0, Math.min(MAP_HEIGHT - canvas.height, ty));
 }
@@ -545,9 +657,12 @@ function gameLoop(now) {
     if (delta < FRAME_INTERVAL) return;
     
     lastFrameRender = now - (delta % FRAME_INTERVAL);
-    const dt = Math.min((now - lastTime) / 1000, 0.05);
+    const dt = Math.min((now - lastTime) / 1000, 0.033);
     lastTime = now;
 
+    // Actualizar movimiento local (predicción)
+    updateLocalMovement(dt);
+    
     updatePerformance();
     updateCamera();
     updateDeathTimer(dt);
@@ -555,16 +670,26 @@ function gameLoop(now) {
     drawMap();
     drawTerrain();
 
+    // Dibujar proyectiles
     for (const pid in gameState.projectiles) {
         drawProjectile(gameState.projectiles[pid]);
     }
 
-    const players = Object.values(gameState.players);
-    for (const plr of players) {
-        if (plr.id !== myId) drawPlayer(plr);
+    // Dibujar otros jugadores con interpolación
+    if (lastServerState && nextServerState) {
+        for (const pid in lastServerState.players) {
+            if (pid !== myId) {
+                const interpolatedPlayer = getInterpolatedPlayer(pid);
+                if (interpolatedPlayer) {
+                    drawPlayer(interpolatedPlayer, false);
+                }
+            }
+        }
     }
-    if (myId && gameState.players[myId]) {
-        drawPlayer(gameState.players[myId]);
+
+    // Dibujar jugador local
+    if (localPlayer) {
+        drawPlayer(localPlayer, true);
     }
 }
 
