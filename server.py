@@ -1,48 +1,44 @@
 import math
 import time
 import uuid
-from flask import Flask, render_template, send_from_directory
-from flask_socketio import SocketIO, emit, disconnect
+from flask import Flask, send_from_directory
+from flask_socketio import SocketIO, emit
 import os
 
 app = Flask(__name__, static_folder="static", template_folder=".")
 app.config["SECRET_KEY"] = "battleground2025"
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading", ping_timeout=60, ping_interval=25)
 
-# MAPA REDUCIDO para mejor performance en Railway free
-MAP_WIDTH = 3000  # Reducido de 5000 a 3000
-MAP_HEIGHT = 3000 # Reducido de 5000 a 3000
+# MAPA REDUCIDO a 2500
+MAP_WIDTH = 2500
+MAP_HEIGHT = 2500
 
 RED_SPAWN = {"x": 150, "y": 150}
-BLUE_SPAWN = {"x": 2850, "y": 2850}
+BLUE_SPAWN = {"x": 2350, "y": 2350}
 
 # Stats de formas (balanceadas)
 SHAPE_DAMAGE = {"circle": 18, "square": 12, "triangle": 14}
 SHAPE_FIRE_RATE = {"circle": 0.8, "square": 0.9, "triangle": 0.35}
-SHAPE_PROJECTILE_COUNT = {"circle": 1, "square": 2, "triangle": 1}  # Reducido square 3->2
-SHAPE_SPREAD = {"circle": 0.0, "square": 0.2, "triangle": 0.0}  # Spread reducido
+SHAPE_PROJECTILE_COUNT = {"circle": 1, "square": 3, "triangle": 1}  # Square 3 balas
+SHAPE_SPREAD = {"circle": 0.0, "square": 0.25, "triangle": 0.0}
 
 # Velocidades ajustadas
 PROJECTILE_SPEED = 550
-PROJECTILE_LIFETIME = 2.5  # Reducido de 3.0
-PLAYER_SPEED = 250
+PROJECTILE_LIFETIME = 2.5
+PLAYER_SPEED = 280  # Ligeramente más rápido para mapa más pequeño
 PLAYER_RADIUS = 20
-PROJECTILE_WIDTH = 10  # Reducido ligeramente
+PROJECTILE_WIDTH = 10
 PROJECTILE_HEIGHT = 5
 
-TICK_RATE = 30  # REDUCIDO de 60 a 30 FPS (suficiente para juego fluido)
+TICK_RATE = 30
 GAME_TICK = 1.0 / TICK_RATE
 
 players = {}
 projectiles = {}
 last_update = time.time()
 
-# Cache para broadcast diferencial
-last_broadcast_state = {}
-player_positions_cache = {}
-
 # ------------------------------------------------------------------
-# TERRENO REDUCIDO (menos objetos)
+# TERRENO REDUCIDO (70 objetos totales)
 # ------------------------------------------------------------------
 TERRAIN_SEED = 42
 
@@ -57,39 +53,43 @@ def generate_solid_obstacles():
     rng = seeded_random_gen(TERRAIN_SEED)
     obstacles = []
 
-    # REDUCIDO: 40 rocas (antes 70)
-    for i in range(40):
+    # 35 rocas
+    for i in range(35):
         x = rng() * MAP_WIDTH
         y = rng() * MAP_HEIGHT
-        w = 40 + rng() * 60   
-        h = 28 + rng() * 40   
-        r = (w + h) / 4       
+        w = 35 + rng() * 55
+        h = 25 + rng() * 35
+        r = (w + h) / 4
         obstacles.append({"type": "rock", "x": x, "y": y, "r": r})
 
-    # 60 arbustos (NO solidos, solo decorativos - no se guardan en server)
-    # No almacenamos arbustos en server para ahorrar memoria
-    
-    # REDUCIDO: 30 cajas (antes 50)
-    for i in range(30):
+    # 35 cajas (con colisión FIXED)
+    for i in range(35):
         x = rng() * MAP_WIDTH
         y = rng() * MAP_HEIGHT
-        size = 22 + rng() * 14
+        size = 20 + rng() * 12
         half = size / 2
-        obstacles.append({"type": "crate", "x": x, "y": y, "rw": half, "rh": half})
+        obstacles.append({
+            "type": "crate", 
+            "x": x, 
+            "y": y, 
+            "rw": half, 
+            "rh": half,
+            "size": size
+        })
 
     return obstacles
 
 solid_obstacles = generate_solid_obstacles()
-print(f"[INFO] {len(solid_obstacles)} solid obstacles generated (optimized)")
+print(f"[INFO] {len(solid_obstacles)} solid obstacles generated (35 rocks, 35 crates)")
 
 def get_spawn(team):
     import random
     if team == "red":
-        return {"x": RED_SPAWN["x"] + random.randint(-60, 60),
-                "y": RED_SPAWN["y"] + random.randint(-60, 60)}
+        return {"x": RED_SPAWN["x"] + random.randint(-50, 50),
+                "y": RED_SPAWN["y"] + random.randint(-50, 50)}
     else:
-        return {"x": BLUE_SPAWN["x"] + random.randint(-60, 60),
-                "y": BLUE_SPAWN["y"] + random.randint(-60, 60)}
+        return {"x": BLUE_SPAWN["x"] + random.randint(-50, 50),
+                "y": BLUE_SPAWN["y"] + random.randint(-50, 50)}
 
 def clamp(val, min_val, max_val):
     return max(min_val, min(max_val, val))
@@ -199,7 +199,6 @@ def game_loop():
             owner_id = proj["owner_id"]
             owner_team = proj.get("owner_team", "")
 
-            # Detección de colisiones optimizada
             for plr_id, plr in list(players.items()):
                 if plr_id == owner_id or plr["team"] == owner_team or plr["dead"]:
                     continue
@@ -244,7 +243,7 @@ def game_loop():
                     plr["dead_timer"] = 0
                     socketio.emit("player_respawned", {"id": plr_id})
 
-        # Broadcast optimizado (solo cambios significativos)
+        # Broadcast del estado del juego
         current_state = {
             "players": {
                 pid: {
@@ -384,7 +383,12 @@ def on_shoot(data):
     damage = SHAPE_DAMAGE[shape]
 
     for i in range(count):
-        shot_angle = angle if count == 1 else angle + (i - (count - 1) / 2) * spread
+        if count == 1:
+            shot_angle = angle
+        else:
+            # Spread simétrico para 3 balas
+            offset = (i - (count - 1) / 2) * spread
+            shot_angle = angle + offset
         pid = str(uuid.uuid4())
         projectiles[pid] = {
             "id": pid,
