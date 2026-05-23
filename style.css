@@ -314,7 +314,7 @@ html, body {
     width: 150px; height: 16px;
     background: rgba(255,255,255,0.06);
     border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 2px;
+    border-radius: 1px;
     overflow: hidden;
 }
 #health-bar-fill {
@@ -322,6 +322,7 @@ html, body {
     width: 100%;
     background: linear-gradient(90deg, #2ecc71, #27ae60);
     transition: width 0.15s, background 0.3s;
+    border-radius: 0;
 }
 #health-bar-text {
     position: absolute;
