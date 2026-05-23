@@ -1,47 +1,49 @@
 import math
 import time
 import uuid
-from flask import Flask, send_from_directory
-from flask_socketio import SocketIO, emit
+from flask import Flask, render_template, send_from_directory
+from flask_socketio import SocketIO, emit, disconnect
 import os
 
 app = Flask(__name__, static_folder="static", template_folder=".")
 app.config["SECRET_KEY"] = "battleground2025"
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading", ping_timeout=60, ping_interval=25)
 
-# Configuración para producción con Gunicorn
-socketio = SocketIO(app, 
-                    cors_allowed_origins="*",
-                    async_mode='eventlet',
-                    ping_timeout=60, 
-                    ping_interval=25)
-
-# MAPA OPTIMIZADO
-MAP_WIDTH = 2500
-MAP_HEIGHT = 2500
+# MAPA REDUCIDO para mejor performance en Railway free
+MAP_WIDTH = 3000  # Reducido de 5000 a 3000
+MAP_HEIGHT = 3000 # Reducido de 5000 a 3000
 
 RED_SPAWN = {"x": 150, "y": 150}
-BLUE_SPAWN = {"x": 2350, "y": 2350}
+BLUE_SPAWN = {"x": 2850, "y": 2850}
 
-# Stats de formas
+# Stats de formas (balanceadas)
 SHAPE_DAMAGE = {"circle": 18, "square": 12, "triangle": 14}
 SHAPE_FIRE_RATE = {"circle": 0.8, "square": 0.9, "triangle": 0.35}
-SHAPE_PROJECTILE_COUNT = {"circle": 1, "square": 2, "triangle": 1}
-SHAPE_SPREAD = {"circle": 0.0, "square": 0.2, "triangle": 0.0}
+SHAPE_PROJECTILE_COUNT = {"circle": 1, "square": 2, "triangle": 1}  # Reducido square 3->2
+SHAPE_SPREAD = {"circle": 0.0, "square": 0.2, "triangle": 0.0}  # Spread reducido
 
-PROJECTILE_SPEED = 500
-PROJECTILE_LIFETIME = 2.0
-PLAYER_SPEED = 220
+# Velocidades ajustadas
+PROJECTILE_SPEED = 550
+PROJECTILE_LIFETIME = 2.5  # Reducido de 3.0
+PLAYER_SPEED = 250
 PLAYER_RADIUS = 20
-PROJECTILE_WIDTH = 10
+PROJECTILE_WIDTH = 10  # Reducido ligeramente
+PROJECTILE_HEIGHT = 5
 
-TICK_RATE = 30
+TICK_RATE = 30  # REDUCIDO de 60 a 30 FPS (suficiente para juego fluido)
 GAME_TICK = 1.0 / TICK_RATE
 
 players = {}
 projectiles = {}
 last_update = time.time()
 
-# Terreno optimizado
+# Cache para broadcast diferencial
+last_broadcast_state = {}
+player_positions_cache = {}
+
+# ------------------------------------------------------------------
+# TERRENO REDUCIDO (menos objetos)
+# ------------------------------------------------------------------
 TERRAIN_SEED = 42
 
 def seeded_random_gen(seed):
@@ -55,36 +57,39 @@ def generate_solid_obstacles():
     rng = seeded_random_gen(TERRAIN_SEED)
     obstacles = []
 
-    # 25 rocas
-    for i in range(25):
+    # REDUCIDO: 40 rocas (antes 70)
+    for i in range(40):
         x = rng() * MAP_WIDTH
         y = rng() * MAP_HEIGHT
-        w = 35 + rng() * 50   
-        h = 25 + rng() * 35   
+        w = 40 + rng() * 60   
+        h = 28 + rng() * 40   
         r = (w + h) / 4       
         obstacles.append({"type": "rock", "x": x, "y": y, "r": r})
 
-    # 15 cajas
-    for i in range(15):
+    # 60 arbustos (NO solidos, solo decorativos - no se guardan en server)
+    # No almacenamos arbustos en server para ahorrar memoria
+    
+    # REDUCIDO: 30 cajas (antes 50)
+    for i in range(30):
         x = rng() * MAP_WIDTH
         y = rng() * MAP_HEIGHT
-        size = 20 + rng() * 12
+        size = 22 + rng() * 14
         half = size / 2
         obstacles.append({"type": "crate", "x": x, "y": y, "rw": half, "rh": half})
 
     return obstacles
 
 solid_obstacles = generate_solid_obstacles()
-print(f"[INFO] {len(solid_obstacles)} solid obstacles generated")
+print(f"[INFO] {len(solid_obstacles)} solid obstacles generated (optimized)")
 
 def get_spawn(team):
     import random
     if team == "red":
-        return {"x": RED_SPAWN["x"] + random.randint(-50, 50),
-                "y": RED_SPAWN["y"] + random.randint(-50, 50)}
+        return {"x": RED_SPAWN["x"] + random.randint(-60, 60),
+                "y": RED_SPAWN["y"] + random.randint(-60, 60)}
     else:
-        return {"x": BLUE_SPAWN["x"] + random.randint(-50, 50),
-                "y": BLUE_SPAWN["y"] + random.randint(-50, 50)}
+        return {"x": BLUE_SPAWN["x"] + random.randint(-60, 60),
+                "y": BLUE_SPAWN["y"] + random.randint(-60, 60)}
 
 def clamp(val, min_val, max_val):
     return max(min_val, min(max_val, val))
@@ -194,6 +199,7 @@ def game_loop():
             owner_id = proj["owner_id"]
             owner_team = proj.get("owner_team", "")
 
+            # Detección de colisiones optimizada
             for plr_id, plr in list(players.items()):
                 if plr_id == owner_id or plr["team"] == owner_team or plr["dead"]:
                     continue
@@ -238,7 +244,7 @@ def game_loop():
                     plr["dead_timer"] = 0
                     socketio.emit("player_respawned", {"id": plr_id})
 
-        # Broadcast estado optimizado
+        # Broadcast optimizado (solo cambios significativos)
         current_state = {
             "players": {
                 pid: {
@@ -272,7 +278,7 @@ def game_loop():
         elapsed = time.time() - loop_start
         sleep_time = tick_interval - elapsed
         if sleep_time > 0:
-            time.sleep(sleep_time)
+            socketio.sleep(min(sleep_time, 0.033))
 
 @app.route("/")
 def index():
@@ -323,7 +329,7 @@ def on_join(data):
         "map_width": MAP_WIDTH,
         "map_height": MAP_HEIGHT
     })
-    print(f"Player joined: [{team}] [{shape}] - Total: {len(players)}")
+    print(f"Player joined: [{team}] [{shape}]")
 
 @socketio.on("player_input")
 def on_input(data):
@@ -399,16 +405,9 @@ def on_disconnect():
     if sid in players:
         del players[sid]
         emit("player_left", {"id": sid}, broadcast=True)
-        print(f"Player disconnected: {sid} - Total: {len(players)}")
+        print(f"Player disconnected: {sid}")
 
 if __name__ == "__main__":
-    print("=" * 50)
-    print("BATTLEGROUND SERVER STARTING")
-    print("=" * 50)
-    print(f"Map: {MAP_WIDTH}x{MAP_HEIGHT}")
-    print(f"Tick rate: {TICK_RATE} Hz")
-    print(f"Obstacles: {len(solid_obstacles)}")
-    print("=" * 50)
-    
+    socketio.start_background_task(game_loop)
     port = int(os.environ.get("PORT", 5000))
-    socketio.run(app, host="0.0.0.0", port=port, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host="0.0.0.0", port=port, debug=False, use_reloader=False, allow_unsafe_werkzeug=True)
