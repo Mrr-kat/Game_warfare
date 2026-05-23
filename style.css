@@ -500,3 +500,15 @@ html, body {
     color: var(--accent);
     letter-spacing: 3px;
 }
+/* Añadir al final del archivo style.css */
+#performance-monitor {
+    user-select: none;
+    font-weight: bold;
+    text-shadow: 0 0 2px black;
+}
+
+/* Mejorar visibilidad del crosshair */
+#crosshair::before,
+#crosshair::after {
+    box-shadow: 0 0 2px rgba(0,0,0,0.5);
+}
