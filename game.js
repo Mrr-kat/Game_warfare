@@ -72,7 +72,7 @@ const performanceDiv = document.createElement("div");
 performanceDiv.id = "performance-monitor";
 performanceDiv.style.cssText = `
     position:fixed;bottom:10px;left:10px;background:rgba(0,0,0,0.7);
-    color:#0f0;font-family:'Share Tech Mono',monospace;font-size:12px;
+    color:#0f0;font-family:'Inter',system-ui,sans-serif;font-size:12px;
     padding:5px 10px;border-radius:4px;z-index:1000;pointer-events:none;
     backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,0.2);`;
 document.body.appendChild(performanceDiv);
@@ -440,7 +440,7 @@ function drawSpawnZone(cx, cy, team) {
     ctx.strokeStyle = `rgba(${color},0.12)`; ctx.lineWidth = 2;
     ctx.setLineDash([10, 8]); ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = `rgba(${color},0.5)`;
-    ctx.font = "bold 11px 'Share Tech Mono',monospace"; ctx.textAlign = "center";
+    ctx.font = "bold 11px 'Inter',sans-serif"; ctx.textAlign = "center";
     ctx.fillText(team === "red" ? "SPAWN ROJO" : "SPAWN AZUL", sx, sy);
 }
 
