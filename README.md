@@ -85,7 +85,7 @@ El primer equipo que acumule 20 eliminaciones gana la partida. Al finalizar, se 
 
    ```bash
    python -m venv venv
-   source venv/bin/activate        # En Windows: venv\Scripts\activate
+   venv\Scripts\activate       # En linux: source venv/bin/activat 
    pip install -r requirements.txt
    ```
 
@@ -225,7 +225,7 @@ The first team to reach 20 eliminations wins the match. When the match ends, a v
 
    ```bash
    python -m venv venv
-   source venv/bin/activate        # On Windows: venv\Scripts\activate
+   venv\Scripts\activate       # On linux: source venv/bin/activat 
    pip install -r requirements.txt
    ```
 
